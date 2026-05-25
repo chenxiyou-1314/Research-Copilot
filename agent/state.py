@@ -62,6 +62,11 @@ class ResearchState(TypedDict, total=False):
     recombinations: list             # 跨论文方法重组方案
     validated_recombinations: list   # 可行性验证后的重组方案
 
+    # ── Trend Forecasting Agent ──
+    timeline: dict                   # 时间线分析结果
+    evolution: dict                  # 方法演化追踪结果
+    trend_forecast: dict             # 趋势预测结果
+
     # ── 流式输出 ──
     stream_buffer: str               # SSE 流式缓冲
 

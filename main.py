@@ -48,6 +48,10 @@ class DecomposeRequest(BaseModel):
     query: str
 
 
+class TrendRequest(BaseModel):
+    query: str
+
+
 # ── SSE 流式综述生成 ──
 @app.post("/research/stream")
 async def research_stream(req: ResearchRequest):
@@ -134,6 +138,16 @@ async def research_stream(req: ResearchRequest):
                     })
                 yield f"data: {json.dumps(decomp_data, ensure_ascii=False)}\n\n"
             
+            # Trend Forecasting
+            if result.get("trend_forecast"):
+                trend_data = {
+                    "step": "trend",
+                    "timeline": result.get("timeline", {}),
+                    "evolution": result.get("evolution", {}),
+                    "forecast": result["trend_forecast"],
+                }
+                yield f"data: {json.dumps(trend_data, ensure_ascii=False)}\n\n"
+            
             # 输出最终综述
             summary = result.get("summary", result.get("answer", "生成失败"))
             yield f"data: {json.dumps({'step': 'done', 'result': summary}, ensure_ascii=False)}\n\n"
@@ -212,6 +226,26 @@ async def method_decomposition(req: DecomposeRequest):
         "decomposition": result["decomposition"],
         "recombinations": result["recombinations"],
         "validated_recombinations": result["validated_recombinations"],
+    }
+
+
+# ── 趋势预测 ──
+@app.post("/trend")
+async def trend_forecast(req: TrendRequest):
+    """独立调用趋势预测（需要论文库中已有论文）。"""
+    from agent.graph import _get_llm, llm
+    from agent.trend_agent import run_trend_forecast
+    
+    papers = paper_store.get_all_papers()
+    if not papers:
+        return {"error": "论文库为空，请先生成综述索引论文", "timeline": {}, "evolution": {}, "trend_forecast": {}}
+    
+    result = run_trend_forecast(llm, papers, [], {}, req.query)
+    
+    return {
+        "timeline": result["timeline"],
+        "evolution": result["evolution"],
+        "trend_forecast": result["trend_forecast"],
     }
 
 
@@ -380,7 +414,7 @@ body{font-family:'Inter',-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;
 <div class="tab-content active" id="tab-generate">
   <div class="hero">
     <h1>Research Copilot</h1>
-    <p>基于多Agent协作的科研文献智能检索与综述生成系统，支持意图识别、查询改写、RAG增强、自反思修订、方法解构与重组</p>
+    <p>基于多Agent协作的科研文献智能检索与综述生成系统，支持意图识别、查询改写、RAG增强、自反思修订、方法解构与重组、趋势预测</p>
   </div>
 
   <div class="stats">
@@ -426,6 +460,13 @@ body{font-family:'Inter',-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;
     <div id="decomp-recombinations"></div>
   </div>
 
+  <div class="card" id="trend-box" style="display:none;margin-top:12px;border-color:var(--warn)">
+    <h3 style="color:var(--warn);margin-bottom:16px">📈 趋势预测 <span class="badge">Trend Agent</span></h3>
+    <div id="trend-timeline" style="margin-bottom:16px"></div>
+    <div id="trend-evolution" style="margin-bottom:16px"></div>
+    <div id="trend-forecast"></div>
+  </div>
+
   <div class="result-box" id="gen-result"></div>
 </div>
 
@@ -455,7 +496,7 @@ body{font-family:'Inter',-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;
 <!-- Tab: Architecture -->
 <div class="tab-content" id="tab-architecture">
   <h2 style="margin-bottom:8px">🏗️ 多Agent架构</h2>
-  <p style="color:var(--text2);font-size:14px;margin-bottom:24px">基于LangGraph构建的多Agent协作系统，7个专业Agent各司其职，Critic实现自我反思与修订闭环，Novelty+Decomposition实现从"读论文"到"造方法"的跃迁。</p>
+  <p style="color:var(--text2);font-size:14px;margin-bottom:24px">基于LangGraph构建的多Agent协作系统，8个专业Agent各司其职：Critic实现自我反思与修订闭环，Novelty发现研究空白，Decomposition重组方法，Trend预测方向趋势——从"读论文"到"造方法"再到"判方向"的全链路决策升级。</p>
 
   <div class="arch-flow">
     <div class="arch-node coordinator"><div class="name">Coordinator</div><div class="desc">规划·调度</div></div>
@@ -471,6 +512,8 @@ body{font-family:'Inter',-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;
     <div class="arch-node" style="border-color:var(--accent)"><div class="name" style="color:var(--accent)">Novelty</div><div class="desc">思路·发现</div></div>
     <div class="arch-arrow">→</div>
     <div class="arch-node" style="border-color:var(--success)"><div class="name" style="color:var(--success)">Decomposition</div><div class="desc">解构·重组</div></div>
+    <div class="arch-arrow">→</div>
+    <div class="arch-node" style="border-color:var(--warn)"><div class="name" style="color:var(--warn)">Trend</div><div class="desc">趋势·预测</div></div>
   </div>
   <div class="arch-loop">
     <span class="loop-arrow">↩</span> 未达标时反馈回Coordinator，重新检索补充论文并修订综述（最多2轮）
@@ -484,6 +527,7 @@ body{font-family:'Inter',-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;
     <div class="card" style="margin-bottom:12px"><h3>Critic Agent <span class="badge">评估</span></h3><p style="color:var(--text2);font-size:13px;line-height:1.7">三维度评估综述质量：覆盖度（是否遗漏重要方法）、准确性（引用和方法描述是否正确）、连贯性（逻辑结构是否清晰）。低于阈值触发Coordinator重跑。</p></div>
     <div class="card" style="margin-bottom:12px"><h3>Novelty Agent <span class="badge">发现</span></h3><p style="color:var(--text2);font-size:13px;line-height:1.7">研究思路发现引擎：Gap分析（方法学/数据/理论/实践四维度空白提取）→跨域迁移（从其他领域寻找可迁移思路）→思路生成（2-3个具体可执行研究方向含技术路线）→新颖性验证（检索已有论文确认无人做过）。</p></div>
     <div class="card" style="margin-bottom:12px"><h3>Decomposition Agent <span class="badge">解构</span></h3><p style="color:var(--text2);font-size:13px;line-height:1.7">方法解构与重组引擎：将每篇论文的方法拆解为5个原子组件（backbone/training_strategy/loss_function/data_augmentation/evaluation_protocol）→构建跨论文组件矩阵→跨论文方法重组（从不同论文中选取组件组合新方案）→可行性验证（兼容性评分/实施难度/风险评估/快速验证方案）。从"读论文"到"造方法"的跃迁。</p></div>
+    <div class="card" style="margin-bottom:12px"><h3>Trend Agent <span class="badge">预测</span></h3><p style="color:var(--text2);font-size:13px;line-height:1.7">研究趋势预测引擎：时间线分析（按年份统计主题分布，识别新兴/衰退/稳定趋势）→方法演化追踪（追踪技术路线演变路径，识别范式转换点）→趋势预测（热度/饱和度/潜力/门槛四维评分 + 短中长期预测 + 投入建议 + 红绿旗信号）。从"这个方向有什么"到"这个方向值不值得做"的决策升级。</p></div>
   </div>
 
   <h3 style="margin:24px 0 12px;color:var(--text)">技术栈</h3>
@@ -505,7 +549,7 @@ body{font-family:'Inter',-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;
 </div>
 
 <script>
-const stepNames={start:'🚀 启动',coordinator:'🧭 Coordinator规划',search:'🔍 论文检索',filter:'📋 论文筛选',index:'💾 索引构建',critic:'🔍 Critic评估',novelty:'💡 新思路发现',decomposition:'🧬 方法解构与重组',done:'✅ 完成'};
+const stepNames={start:'🚀 启动',coordinator:'🧭 Coordinator规划',search:'🔍 论文检索',filter:'📋 论文筛选',index:'💾 索引构建',critic:'🔍 Critic评估',novelty:'💡 新思路发现',decomposition:'🧬 方法解构与重组',trend:'📈 趋势预测',done:'✅ 完成'};
 let completedSteps=[];
 
 function switchTab(t){document.querySelectorAll('.tab-content').forEach(e=>e.classList.remove('active'));document.querySelectorAll('.nav-links button').forEach(e=>e.classList.remove('active'));document.getElementById('tab-'+t).classList.add('active');event.target.classList.add('active');if(t==='papers')loadPapers();if(t==='generate')refreshStats();}
@@ -527,6 +571,7 @@ function updateProgress(step,data){
   if(step==='critic'&&data.overall)msg+=' — 总分 '+data.overall+'/5 ('+(data.passed?'通过':'未通过，将重跑')+')';
   if(step==='novelty'&&data.ideas_count)msg+=' — 发现 '+data.ideas_count+' 个新思路';
   if(step==='decomposition'&&data.papers_decomposed)msg+=' — 解构 '+data.papers_decomposed+' 篇论文，生成 '+data.recombinations_count+' 个重组方案';
+  if(step==='trend'&&data.forecast)msg+=' — 方向阶段: '+(data.forecast.overall_phase||'分析中');
   logEl.innerHTML+='<div class="step-'+step+'">'+msg+'</div>';
   logEl.scrollTop=logEl.scrollHeight;
 }
@@ -538,6 +583,7 @@ async function doGenerate(){
   resultEl.style.display='none';criticEl.style.display='none';progressEl.style.display='block';
   document.getElementById('novelty-box').style.display='none';
   document.getElementById('decomp-box').style.display='none';
+  document.getElementById('trend-box').style.display='none';
   completedSteps=[];
   document.getElementById('progress-steps').innerHTML='';
   document.getElementById('progress-log').innerHTML='';
@@ -632,6 +678,95 @@ async function doGenerate(){
               recombHtml+='</div>';
             });
             document.getElementById('decomp-recombinations').innerHTML=recombHtml;
+          }
+          if(d.step==='trend'){
+            const tb=document.getElementById('trend-box');tb.style.display='block';
+            const fc=d.forecast||{};
+            const tl=d.timeline||{};
+            const ev=d.evolution||{};
+            // Phase badge
+            const phase=fc.overall_phase||'分析中';
+            const phaseColors={'上升期':'var(--success)','平台期':'var(--warn)','饱和期':'var(--danger)','衰退期':'var(--danger)'};
+            const phaseColor=phaseColors[phase]||'var(--primary)';
+            // Score cards
+            const scores=fc.direction_score||{};
+            let forecastHtml='<div style="display:flex;align-items:center;gap:16px;margin-bottom:20px;flex-wrap:wrap">';
+            forecastHtml+='<div style="background:var(--bg);padding:12px 20px;border-radius:10px;border:2px solid '+phaseColor+'"><div style="font-size:11px;color:var(--text3);margin-bottom:4px">发展阶段</div><div style="font-size:1.5em;font-weight:800;color:'+phaseColor+'">'+phase+'</div></div>';
+            const scoreItems=[{k:'heat',l:'研究热度',icon:'🔥'},{k:'saturation',l:'饱和度',icon:'📦'},{k:'potential',l:'潜力',icon:'🚀'},{k:'entry_barrier',l:'入门门槛',icon:'🚧'}];
+            scoreItems.forEach(s=>{
+              const v=scores[s.k]||3;
+              const barW=v*20;
+              const sColor=v>=4?'var(--success)':v>=3?'var(--warn)':'var(--danger)';
+              if(s.k==='saturation'||s.k==='entry_barrier'){/* 反向：低更好 */}
+              forecastHtml+='<div style="background:var(--bg);padding:10px 16px;border-radius:10px;min-width:100px"><div style="font-size:11px;color:var(--text3);margin-bottom:4px">'+s.icon+' '+s.l+'</div><div style="font-size:1.3em;font-weight:800;color:var(--text)">'+v+'/5</div><div style="height:4px;background:var(--border);border-radius:2px;margin-top:4px"><div style="height:4px;width:'+barW+'%;background:'+sColor+';border-radius:2px"></div></div></div>';
+            });
+            forecastHtml+='</div>';
+            // Phase reasoning
+            if(fc.phase_reasoning)forecastHtml+='<div style="background:var(--bg);padding:14px;border-radius:8px;margin-bottom:16px;font-size:13px;color:var(--text2);line-height:1.7;border-left:3px solid '+phaseColor+'">'+fc.phase_reasoning+'</div>';
+            // Timeline mini chart
+            const yd=tl.year_distribution||{};
+            const years=Object.keys(yd).sort();
+            if(years.length>0){
+              const maxCount=Math.max(...years.map(y=>(yd[y]||{}).count||0),1);
+              forecastHtml+='<h4 style="color:var(--text);font-size:13px;margin-bottom:8px">📅 论文时间线</h4><div style="display:flex;align-items:flex-end;gap:6px;height:80px;margin-bottom:16px;padding:0 4px">';
+              years.forEach(y=>{
+                const cnt=(yd[y]||{}).count||0;
+                const h=Math.max(8,Math.round(cnt/maxCount*70));
+                const kws=((yd[y]||{}).keywords||[]).slice(0,2).join(', ');
+                forecastHtml+='<div style="flex:1;text-align:center" title="'+kws+'"><div style="height:'+h+'px;background:linear-gradient(180deg,var(--primary),var(--primary2));border-radius:4px 4px 0 0;margin:0 auto;width:80%"></div><div style="font-size:10px;color:var(--text3);margin-top:4px">'+y+'</div><div style="font-size:9px;color:var(--primary)">'+cnt+'篇</div></div>';
+              });
+              forecastHtml+='</div>';
+            }
+            // Evolution paths
+            const ePaths=ev.evolution_paths||[];
+            if(ePaths.length>0){
+              forecastHtml+='<h4 style="color:var(--text);font-size:13px;margin-bottom:8px">🔄 方法演化路径</h4>';
+              ePaths.forEach(path=>{
+                forecastHtml+='<div style="background:var(--bg);padding:14px;border-radius:8px;margin-bottom:10px">';
+                forecastHtml+='<div style="font-size:13px;font-weight:600;color:var(--primary);margin-bottom:8px">'+path.path_name+(path.paradigm_shift?' <span style="font-size:10px;background:rgba(248,113,113,0.15);color:var(--danger);padding:2px 6px;border-radius:3px">范式转换</span>':'')+'</div>';
+                const stages=path.stages||[];
+                stages.forEach((st,si)=>{
+                  forecastHtml+='<div style="display:flex;align-items:baseline;gap:8px;margin:6px 0;padding-left:8px;border-left:2px solid var(--accent)">';
+                  forecastHtml+='<span style="font-size:11px;color:var(--text3);min-width:80px">'+st.time_range+'</span>';
+                  forecastHtml+='<span style="font-size:12px;color:var(--text)">'+st.core_method+'</span>';
+                  if(st.key_improvement)forecastHtml+='<span style="font-size:11px;color:var(--success)">→ '+st.key_improvement+'</span>';
+                  if(st.key_limitation)forecastHtml+='<span style="font-size:11px;color:var(--danger)">('+st.key_limitation+')</span>';
+                  forecastHtml+='</div>';
+                });
+                if(path.shift_reason)forecastHtml+='<div style="font-size:11px;color:var(--accent);margin-top:4px;padding-left:8px">💡 '+path.shift_reason+'</div>';
+                forecastHtml+='</div>';
+              });
+            }
+            // Forecast timeline
+            const fcs=fc.forecast||[];
+            if(fcs.length>0){
+              forecastHtml+='<h4 style="color:var(--text);font-size:13px;margin-bottom:8px">🔮 趋势预测</h4><div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:8px;margin-bottom:16px">';
+              fcs.forEach(f=>{
+                const confPct=Math.round((f.confidence||0.5)*100);
+                forecastHtml+='<div style="background:var(--bg);padding:12px;border-radius:8px"><div style="font-size:11px;color:var(--primary);margin-bottom:4px">'+f.time_horizon+' <span style="color:var(--text3)">置信度:'+confPct+'%</span></div><div style="font-size:12px;color:var(--text2);line-height:1.6">'+f.prediction+'</div></div>';
+              });
+              forecastHtml+='</div>';
+            }
+            // Investment advice
+            const adv=fc.investment_advice||{};
+            if(Object.keys(adv).length>0){
+              forecastHtml+='<h4 style="color:var(--text);font-size:13px;margin-bottom:8px">💡 投入建议</h4><div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:16px">';
+              const advMap={for_beginner:{l:'🎓 新手建议',color:'var(--primary)'},for_advanced:{l:'🔬 进阶建议',color:'var(--accent)'},low_hanging_fruit:{l:'🍎 低垂果实',color:'var(--success)'},high_risk_high_reward:{l:'🎰 高风险高回报',color:'var(--danger)'}};
+              for(const[ak,al] of Object.entries(advMap)){
+                if(adv[ak])forecastHtml+='<div style="background:var(--bg);padding:12px;border-radius:8px;border-left:3px solid '+al.color+'"><div style="font-size:11px;color:'+al.color+';margin-bottom:4px">'+al.l+'</div><div style="font-size:12px;color:var(--text2)">'+adv[ak]+'</div></div>';
+              }
+              forecastHtml+='</div>';
+            }
+            // Red/Green flags
+            const rf=fc.red_flags||[];
+            const gf=fc.green_flags||[];
+            if(rf.length||gf.length){
+              forecastHtml+='<div style="display:grid;grid-template-columns:1fr 1fr;gap:8px">';
+              if(gf.length){forecastHtml+='<div style="background:rgba(52,211,153,0.05);padding:12px;border-radius:8px;border:1px solid rgba(52,211,153,0.2)"><div style="font-size:12px;color:var(--success);margin-bottom:6px">✅ 积极信号</div>'+gf.map(g=>'<div style="font-size:11px;color:var(--text2);margin:3px 0;padding-left:8px;border-left:2px solid var(--success)">'+g+'</div>').join('')+'</div>';}
+              if(rf.length){forecastHtml+='<div style="background:rgba(248,113,113,0.05);padding:12px;border-radius:8px;border:1px solid rgba(248,113,113,0.2)"><div style="font-size:12px;color:var(--danger);margin-bottom:6px">⚠️ 风险信号</div>'+rf.map(r=>'<div style="font-size:11px;color:var(--text2);margin:3px 0;padding-left:8px;border-left:2px solid var(--danger)">'+r+'</div>').join('')+'</div>';}
+              forecastHtml+='</div>';
+            }
+            document.getElementById('trend-forecast').innerHTML=forecastHtml;
           }
           if(d.step==='done'){
             resultEl.innerHTML=renderMarkdown(d.result);resultEl.style.display='block';

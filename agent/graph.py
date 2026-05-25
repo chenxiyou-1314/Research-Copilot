@@ -11,6 +11,7 @@ from agent.writing_agent import generate_summary, generate_qa_answer, revise_sum
 from agent.critic_agent import evaluate_summary
 from agent.novelty_agent import run_novelty_analysis
 from agent.decomposition_agent import run_decomposition
+from agent.trend_agent import run_trend_forecast
 from tools.vector_store import VectorStore
 from memory.paper_store import PaperStore
 from memory.user_profile import UserProfile
@@ -211,7 +212,27 @@ def decomposition_node(state: ResearchState) -> dict:
     }
 
 
-# ── 节点9: 记忆更新 ──
+# ── 节点9: Trend Forecasting Agent ──
+def trend_node(state: ResearchState) -> dict:
+    """Trend Forecasting Agent: 时间线分析→方法演化追踪→趋势预测"""
+    papers = state.get("filtered_papers", state.get("papers", []))
+    decomposition = state.get("decomposition", [])
+    gaps = state.get("gaps", {})
+    query = state["query"]
+
+    if not papers:
+        return {}
+
+    result = run_trend_forecast(llm, papers, decomposition, gaps, query)
+
+    return {
+        "timeline": result["timeline"],
+        "evolution": result["evolution"],
+        "trend_forecast": result["trend_forecast"],
+    }
+
+
+# ── 节点10: 记忆更新 ──
 def memory_node(state: ResearchState) -> dict:
     """持久化论文库 + 更新用户偏好"""
     paper_store.save()
@@ -255,6 +276,7 @@ def build_graph() -> StateGraph:
     graph.add_node("critic", critic_node)
     graph.add_node("novelty", novelty_node)
     graph.add_node("decomposition", decomposition_node)
+    graph.add_node("trend", trend_node)
     graph.add_node("memory", memory_node)
 
     # 入口
@@ -286,9 +308,10 @@ def build_graph() -> StateGraph:
         },
     )
 
-    # Novelty → Decomposition → Memory
+    # Novelty → Decomposition → Trend → Memory
     graph.add_edge("novelty", "decomposition")
-    graph.add_edge("decomposition", "memory")
+    graph.add_edge("decomposition", "trend")
+    graph.add_edge("trend", "memory")
     graph.add_edge("memory", END)
 
     return graph.compile()

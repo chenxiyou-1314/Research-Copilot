@@ -142,6 +142,30 @@ async def papers_status():
     }
 
 
+# ── 论文列表 ──
+@app.get("/papers/list")
+async def papers_list(keyword: str = "", limit: int = 50):
+    """查看已索引论文列表，支持关键词搜索。"""
+    if keyword:
+        papers = paper_store.search_by_keyword(keyword)
+    else:
+        papers = paper_store.get_all_papers()
+    # 只返回摘要前200字，节省带宽
+    result = []
+    for p in papers[:limit]:
+        result.append({
+            "title": p.get("title", ""),
+            "authors": p.get("authors", [])[:3],
+            "year": p.get("year"),
+            "citations": p.get("citations", 0),
+            "source": p.get("source", ""),
+            "abstract": p.get("abstract", "")[:200] + "...",
+            "url": p.get("url", ""),
+            "is_indexed": p.get("is_indexed", False),
+        })
+    return {"total": len(papers), "showing": len(result), "papers": result}
+
+
 # ── 健康检查 ──
 @app.get("/", response_class=HTMLResponse)
 async def home():

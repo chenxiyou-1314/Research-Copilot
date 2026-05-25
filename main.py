@@ -422,8 +422,29 @@ body{font-family:'Inter',-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;
 .empty-state{text-align:center;padding:60px 20px;color:var(--text3)}
 .empty-state .icon{font-size:48px;margin-bottom:16px}
 .empty-state p{font-size:14px}
+/* Trend standalone */
+.trend-phase-badge{display:inline-flex;align-items:center;gap:8px;padding:10px 24px;border-radius:12px;font-size:1.3em;font-weight:800;border:2px solid}
+.trend-scores-grid{display:grid;grid-template-columns:repeat(4,1fr);gap:12px;margin:16px 0}
+.trend-score-card{background:var(--bg);padding:14px;border-radius:10px;text-align:center}
+.trend-score-card .num{font-size:1.8em;font-weight:800}
+.trend-score-card .label{font-size:11px;color:var(--text3);margin-top:4px}
+.trend-score-bar{height:6px;background:var(--border);border-radius:3px;margin-top:6px}
+.trend-score-bar div{height:100%;border-radius:3px;transition:width .5s}
+/* Profile visualization */
+.profile-canvas-wrap{display:flex;justify-content:center;padding:20px 0}
+.profile-canvas-wrap canvas{border-radius:12px}
+.mastery-row{display:flex;align-items:center;gap:12px;padding:10px 0;border-bottom:1px solid rgba(30,58,95,0.3)}
+.mastery-row:last-child{border-bottom:none}
+.mastery-label{font-size:13px;color:var(--text);min-width:120px;font-weight:600}
+.mastery-bar-track{flex:1;height:8px;background:var(--border);border-radius:4px;overflow:hidden}
+.mastery-bar-fill{height:100%;border-radius:4px;transition:width .6s ease}
+.mastery-depth{font-size:11px;padding:2px 8px;border-radius:4px;min-width:80px;text-align:center}
+.mastery-domain-tag{font-size:10px;color:var(--text3);min-width:60px}
+.legend-row{display:flex;gap:16px;justify-content:center;flex-wrap:wrap;margin-top:12px}
+.legend-item{font-size:11px;color:var(--text3);display:flex;align-items:center;gap:4px}
+.legend-dot{width:10px;height:10px;border-radius:50%;display:inline-block}
 /* Responsive */
-@media(max-width:768px){.stats{grid-template-columns:repeat(2,1fr)}.hero h1{font-size:1.8em}.critic-scores{grid-template-columns:repeat(2,1fr)}.nav-links button span{display:none}}
+@media(max-width:768px){.stats{grid-template-columns:repeat(2,1fr)}.hero h1{font-size:1.8em}.critic-scores{grid-template-columns:repeat(2,1fr)}.trend-scores-grid{grid-template-columns:repeat(2,1fr)}.nav-links button span{display:none}}
 </style>
 </head>
 <body>
@@ -434,6 +455,8 @@ body{font-family:'Inter',-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;
     <button class="active" onclick="switchTab('generate')">综述生成</button>
     <button onclick="switchTab('papers')">论文库</button>
     <button onclick="switchTab('qa')">问答</button>
+    <button onclick="switchTab('trend')">趋势预测</button>
+    <button onclick="switchTab('profile')">知识图谱</button>
     <button onclick="switchTab('architecture')">架构</button>
   </div>
 </nav>
@@ -529,6 +552,83 @@ body{font-family:'Inter',-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;
       <button class="btn btn-primary" onclick="doQA()">提问</button>
     </div>
     <div class="qa-answer" id="qa-answer"></div>
+  </div>
+</div>
+
+<!-- Tab: Trend -->
+<div class="tab-content" id="tab-trend">
+  <h2 style="margin-bottom:8px">📈 趋势预测</h2>
+  <p style="color:var(--text2);font-size:14px;margin-bottom:20px">输入研究方向，分析热度/饱和度/潜力/门槛四维评分，判断方向值不值得做。需要论文库中已有论文。</p>
+
+  <div class="search-section">
+    <div class="search-row">
+      <input class="search-input" id="trend-query" placeholder="输入研究方向，如：vision-language model adaptation" />
+      <button class="btn btn-primary" onclick="doTrendStandalone()">分析趋势</button>
+    </div>
+  </div>
+
+  <div id="trend-standalone-result" style="display:none">
+    <div id="trend-sa-phase" style="margin-bottom:16px"></div>
+    <div id="trend-sa-scores" class="trend-scores-grid"></div>
+    <div id="trend-sa-reasoning" style="margin-bottom:16px"></div>
+    <div id="trend-sa-timeline" style="margin-bottom:16px"></div>
+    <div id="trend-sa-evolution" style="margin-bottom:16px"></div>
+    <div id="trend-sa-forecast" style="margin-bottom:16px"></div>
+    <div id="trend-sa-advice" style="margin-bottom:16px"></div>
+    <div id="trend-sa-flags"></div>
+  </div>
+
+  <div id="trend-standalone-empty" class="empty-state">
+    <div class="icon">📊</div>
+    <p>输入研究方向，获取四维趋势评分与投入建议</p>
+  </div>
+</div>
+
+<!-- Tab: Profile -->
+<div class="tab-content" id="tab-profile">
+  <h2 style="margin-bottom:8px">🗺️ 研究知识图谱</h2>
+  <p style="color:var(--text2);font-size:14px;margin-bottom:20px">基于历史查询和已索引论文，构建你的个人知识图谱——核心领域、已掌握方法、知识盲区、研究风格画像。</p>
+
+  <div style="text-align:center;margin-bottom:20px">
+    <button class="btn btn-primary" onclick="doProfileStandalone()">🔄 生成知识图谱</button>
+  </div>
+
+  <div id="profile-standalone-result" style="display:none">
+    <!-- Radar Chart -->
+    <div class="card" style="margin-bottom:16px">
+      <h3>🎯 领域掌握度雷达图</h3>
+      <div class="profile-canvas-wrap"><canvas id="profile-radar" width="420" height="420"></canvas></div>
+      <div class="legend-row" id="radar-legend"></div>
+    </div>
+
+    <!-- Mastery Bars -->
+    <div class="card" style="margin-bottom:16px">
+      <h3>🔧 方法掌握度</h3>
+      <div id="profile-sa-mastery"></div>
+    </div>
+
+    <!-- Blindspots -->
+    <div class="card" style="margin-bottom:16px">
+      <h3>🕳️ 知识盲区 <span class="badge">需要补强</span></h3>
+      <div id="profile-sa-blindspots"></div>
+    </div>
+
+    <!-- Unread -->
+    <div class="card" style="margin-bottom:16px">
+      <h3>📚 高相关但未覆盖 <span class="badge">建议探索</span></h3>
+      <div id="profile-sa-unread"></div>
+    </div>
+
+    <!-- Research Style -->
+    <div class="card" style="margin-bottom:16px">
+      <h3>👤 研究风格画像</h3>
+      <div id="profile-sa-style"></div>
+    </div>
+  </div>
+
+  <div id="profile-standalone-empty" class="empty-state">
+    <div class="icon">🗺️</div>
+    <p>点击上方按钮，生成你的研究知识图谱</p>
   </div>
 </div>
 
@@ -924,6 +1024,263 @@ async function doQA(){
     const data=await resp.json();
     el.innerHTML=renderMarkdown(data.answer);
   }catch(e){el.textContent='Error: '+e.message;}
+}
+
+// ── Trend Standalone ──
+async function doTrendStandalone(){
+  const q=document.getElementById('trend-query').value.trim();if(!q)return;
+  const resultEl=document.getElementById('trend-standalone-result');
+  const emptyEl=document.getElementById('trend-standalone-empty');
+  resultEl.style.display='none';emptyEl.style.display='none';
+  // Show loading
+  document.getElementById('trend-sa-phase').innerHTML='<div style="text-align:center;padding:40px;color:var(--text3)">⏳ 正在分析趋势，请稍候...</div>';
+  resultEl.style.display='block';
+  try{
+    const resp=await fetch('/trend',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({query:q})});
+    const data=await resp.json();
+    if(data.error){document.getElementById('trend-sa-phase').innerHTML='<div class="empty-state"><div class="icon">📭</div><p>'+data.error+'</p></div>';return;}
+    const fc=data.trend_forecast||{};
+    const tl=data.timeline||{};
+    const ev=data.evolution||{};
+    // Phase badge
+    const phase=fc.overall_phase||'分析中';
+    const phaseColors={'上升期':'var(--success)','平台期':'var(--warn)','饱和期':'var(--danger)','衰退期':'var(--danger)'};
+    const pc=phaseColors[phase]||'var(--primary)';
+    document.getElementById('trend-sa-phase').innerHTML='<div style="text-align:center"><span class="trend-phase-badge" style="border-color:'+pc+';color:'+pc+'">'+phase+'</span></div>';
+    // Score cards
+    const scores=fc.direction_score||{};
+    const scoreItems=[{k:'heat',l:'🔥 研究热度'},{k:'saturation',l:'📦 饱和度'},{k:'potential',l:'🚀 潜力'},{k:'entry_barrier',l:'🚧 入门门槛'}];
+    let scoresHtml='';
+    scoreItems.forEach(s=>{
+      const v=scores[s.k]||3;
+      const sColor=v>=4?'var(--success)':v>=3?'var(--warn)':'var(--danger)';
+      scoresHtml+='<div class="trend-score-card"><div class="num" style="color:'+sColor+'">'+v+'/5</div><div class="label">'+s.l+'</div><div class="trend-score-bar"><div style="width:'+v*20+'%;background:'+sColor+'"></div></div></div>';
+    });
+    document.getElementById('trend-sa-scores').innerHTML=scoresHtml;
+    // Reasoning
+    if(fc.phase_reasoning)document.getElementById('trend-sa-reasoning').innerHTML='<div class="card"><div style="font-size:13px;color:var(--text2);line-height:1.7;border-left:3px solid '+pc+';padding-left:12px">'+fc.phase_reasoning+'</div></div>';
+    else document.getElementById('trend-sa-reasoning').innerHTML='';
+    // Timeline
+    const yd=tl.year_distribution||{};
+    const years=Object.keys(yd).sort();
+    if(years.length>0){
+      const maxCount=Math.max(...years.map(y=>(yd[y]||{}).count||0),1);
+      let tlHtml='<div class="card"><h3>📅 论文时间线</h3><div style="display:flex;align-items:flex-end;gap:8px;height:100px;padding:0 8px">';
+      years.forEach(y=>{
+        const cnt=(yd[y]||{}).count||0;
+        const h=Math.max(12,Math.round(cnt/maxCount*85));
+        const kws=((yd[y]||{}).keywords||[]).slice(0,2).join(', ');
+        tlHtml+='<div style="flex:1;text-align:center" title="'+kws+'"><div style="height:'+h+'px;background:linear-gradient(180deg,var(--primary),var(--primary2));border-radius:4px 4px 0 0;margin:0 auto;width:70%"></div><div style="font-size:11px;color:var(--text3);margin-top:4px">'+y+'</div><div style="font-size:10px;color:var(--primary)">'+cnt+'篇</div></div>';
+      });
+      tlHtml+='</div></div>';
+      document.getElementById('trend-sa-timeline').innerHTML=tlHtml;
+    }
+    // Evolution
+    const ePaths=ev.evolution_paths||[];
+    if(ePaths.length>0){
+      let evHtml='<div class="card"><h3>🔄 方法演化路径</h3>';
+      ePaths.forEach(path=>{
+        evHtml+='<div style="background:var(--bg);padding:14px;border-radius:8px;margin-bottom:10px">';
+        evHtml+='<div style="font-size:13px;font-weight:600;color:var(--primary);margin-bottom:8px">'+path.path_name+(path.paradigm_shift?' <span style="font-size:10px;background:rgba(248,113,113,0.15);color:var(--danger);padding:2px 6px;border-radius:3px">范式转换</span>':'')+'</div>';
+        (path.stages||[]).forEach(st=>{
+          evHtml+='<div style="display:flex;align-items:baseline;gap:8px;margin:6px 0;padding-left:8px;border-left:2px solid var(--accent)">';
+          evHtml+='<span style="font-size:11px;color:var(--text3);min-width:80px">'+st.time_range+'</span>';
+          evHtml+='<span style="font-size:12px;color:var(--text)">'+st.core_method+'</span>';
+          if(st.key_improvement)evHtml+='<span style="font-size:11px;color:var(--success)">→ '+st.key_improvement+'</span>';
+          evHtml+='</div>';
+        });
+        if(path.shift_reason)evHtml+='<div style="font-size:11px;color:var(--accent);margin-top:4px;padding-left:8px">💡 '+path.shift_reason+'</div>';
+        evHtml+='</div>';
+      });
+      evHtml+='</div>';
+      document.getElementById('trend-sa-evolution').innerHTML=evHtml;
+    }
+    // Forecast timeline
+    const fcs=fc.forecast||[];
+    if(fcs.length>0){
+      let fcHtml='<div class="card"><h3>🔮 趋势预测</h3><div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:8px">';
+      fcs.forEach(f=>{
+        const confPct=Math.round((f.confidence||0.5)*100);
+        fcHtml+='<div style="background:var(--bg);padding:12px;border-radius:8px"><div style="font-size:11px;color:var(--primary);margin-bottom:4px">'+f.time_horizon+' <span style="color:var(--text3)">置信度:'+confPct+'%</span></div><div style="font-size:12px;color:var(--text2);line-height:1.6">'+f.prediction+'</div></div>';
+      });
+      fcHtml+='</div></div>';
+      document.getElementById('trend-sa-forecast').innerHTML=fcHtml;
+    }
+    // Investment advice
+    const adv=fc.investment_advice||{};
+    if(Object.keys(adv).length>0){
+      let advHtml='<div class="card"><h3>💡 投入建议</h3><div style="display:grid;grid-template-columns:1fr 1fr;gap:8px">';
+      const advMap={for_beginner:{l:'🎓 新手建议',c:'var(--primary)'},for_advanced:{l:'🔬 进阶建议',c:'var(--accent)'},low_hanging_fruit:{l:'🍎 低垂果实',c:'var(--success)'},high_risk_high_reward:{l:'🎰 高风险高回报',c:'var(--danger)'}};
+      for(const[ak,al] of Object.entries(advMap)){
+        if(adv[ak])advHtml+='<div style="background:var(--bg);padding:12px;border-radius:8px;border-left:3px solid '+al.c+'"><div style="font-size:11px;color:'+al.c+';margin-bottom:4px">'+al.l+'</div><div style="font-size:12px;color:var(--text2)">'+adv[ak]+'</div></div>';
+      }
+      advHtml+='</div></div>';
+      document.getElementById('trend-sa-advice').innerHTML=advHtml;
+    }
+    // Red/Green flags
+    const rf=fc.red_flags||[];
+    const gf=fc.green_flags||[];
+    if(rf.length||gf.length){
+      let flHtml='<div class="card"><div style="display:grid;grid-template-columns:1fr 1fr;gap:8px">';
+      if(gf.length)flHtml+='<div style="background:rgba(52,211,153,0.05);padding:12px;border-radius:8px;border:1px solid rgba(52,211,153,0.2)"><div style="font-size:12px;color:var(--success);margin-bottom:6px">✅ 积极信号</div>'+gf.map(g=>'<div style="font-size:11px;color:var(--text2);margin:3px 0;padding-left:8px;border-left:2px solid var(--success)">'+g+'</div>').join('')+'</div>';
+      if(rf.length)flHtml+='<div style="background:rgba(248,113,113,0.05);padding:12px;border-radius:8px;border:1px solid rgba(248,113,113,0.2)"><div style="font-size:12px;color:var(--danger);margin-bottom:6px">⚠️ 风险信号</div>'+rf.map(r=>'<div style="font-size:11px;color:var(--text2);margin:3px 0;padding-left:8px;border-left:2px solid var(--danger)">'+r+'</div>').join('')+'</div>';
+      flHtml+='</div></div>';
+      document.getElementById('trend-sa-flags').innerHTML=flHtml;
+    }
+  }catch(e){document.getElementById('trend-sa-phase').innerHTML='<div class="empty-state"><div class="icon">❌</div><p>请求失败: '+e.message+'</p></div>';}
+}
+
+// ── Profile Standalone ──
+async function doProfileStandalone(){
+  const resultEl=document.getElementById('profile-standalone-result');
+  const emptyEl=document.getElementById('profile-standalone-empty');
+  resultEl.style.display='none';emptyEl.style.display='none';
+  try{
+    const resp=await fetch('/profile',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({query:''})});
+    const data=await resp.json();
+    if(data.error||!data.profile_graph||Object.keys(data.profile_graph).length===0){emptyEl.innerHTML='<div class="icon">📭</div><p>'+(data.error||'暂无数据，请先生成综述或检索论文')+'</p>';emptyEl.style.display='block';return;}
+    const pg=data.profile_graph;
+    resultEl.style.display='block';
+    // Radar chart
+    drawRadarChart(pg.core_domains||[]);
+    // Mastery bars
+    renderMasteryBars(pg.mastered_methods||[]);
+    // Blindspots
+    renderBlindspots(pg.knowledge_blindspots||[]);
+    // Unread
+    renderUnread(pg.unread_relevant||[]);
+    // Style
+    renderStyle(pg.research_style||{});
+  }catch(e){emptyEl.innerHTML='<div class="icon">❌</div><p>请求失败: '+e.message+'</p>';emptyEl.style.display='block';}
+}
+
+function drawRadarChart(domains){
+  const canvas=document.getElementById('profile-radar');
+  if(!canvas||!domains.length)return;
+  const ctx=canvas.getContext('2d');
+  const W=canvas.width,H=canvas.height;
+  const cx=W/2,cy=H/2;
+  const R=Math.min(W,H)/2-50;
+  const n=domains.length;
+  const masteryMap={'精通':5,'熟悉':3,'了解':1};
+  const masteryColorMap={'精通':'#34d399','熟悉':'#38bdf8','了解':'#64748b'};
+
+  ctx.clearRect(0,0,W,H);
+
+  // Grid circles
+  for(let ring=1;ring<=5;ring++){
+    const r=R*ring/5;
+    ctx.beginPath();ctx.arc(cx,cy,r,0,Math.PI*2);
+    ctx.strokeStyle='rgba(56,189,248,0.1)';ctx.lineWidth=1;ctx.stroke();
+  }
+
+  // Axis lines + labels
+  const angleStep=Math.PI*2/n;
+  const labels=['了解','入门','熟悉','掌握','精通'];
+  domains.forEach((d,i)=>{
+    const a=-Math.PI/2+angleStep*i;
+    const ex=cx+R*Math.cos(a),ey=cy+R*Math.sin(a);
+    ctx.beginPath();ctx.moveTo(cx,cy);ctx.lineTo(ex,ey);
+    ctx.strokeStyle='rgba(56,189,248,0.15)';ctx.lineWidth=1;ctx.stroke();
+    // Label
+    const lx=cx+(R+28)*Math.cos(a),ly=cy+(R+28)*Math.sin(a);
+    ctx.fillStyle=masteryColorMap[d.mastery]||'#94a3b8';
+    ctx.font='bold 12px Inter,sans-serif';ctx.textAlign='center';ctx.textBaseline='middle';
+    ctx.fillText(d.name,lx,ly-8);
+    ctx.fillStyle='#64748b';ctx.font='10px Inter,sans-serif';
+    ctx.fillText(d.mastery+' · '+(d.papers_count||0)+'篇',lx,ly+8);
+  });
+
+  // Data polygon
+  ctx.beginPath();
+  domains.forEach((d,i)=>{
+    const a=-Math.PI/2+angleStep*i;
+    const v=masteryMap[d.mastery]||1;
+    const r=R*v/5;
+    const x=cx+r*Math.cos(a),y=cy+r*Math.sin(a);
+    if(i===0)ctx.moveTo(x,y);else ctx.lineTo(x,y);
+  });
+  ctx.closePath();
+  ctx.fillStyle='rgba(56,189,248,0.15)';ctx.fill();
+  ctx.strokeStyle='#38bdf8';ctx.lineWidth=2;ctx.stroke();
+
+  // Data points
+  domains.forEach((d,i)=>{
+    const a=-Math.PI/2+angleStep*i;
+    const v=masteryMap[d.mastery]||1;
+    const r=R*v/5;
+    const x=cx+r*Math.cos(a),y=cy+r*Math.sin(a);
+    ctx.beginPath();ctx.arc(x,y,5,0,Math.PI*2);
+    ctx.fillStyle=masteryColorMap[d.mastery]||'#94a3b8';ctx.fill();
+    ctx.strokeStyle='#0a0f1a';ctx.lineWidth=2;ctx.stroke();
+  });
+
+  // Legend
+  let legendHtml='';
+  const legItems=[{c:'#34d399',l:'精通 (5/5)'},{c:'#38bdf8',l:'熟悉 (3/5)'},{c:'#64748b',l:'了解 (1/5)'}];
+  legItems.forEach(li=>{legendHtml+='<span class="legend-item"><span class="legend-dot" style="background:'+li.c+'"></span>'+li.l+'</span>';});
+  document.getElementById('radar-legend').innerHTML=legendHtml;
+}
+
+function renderMasteryBars(methods){
+  if(!methods.length){document.getElementById('profile-sa-mastery').innerHTML='<p style="color:var(--text3);font-size:13px">暂无数据</p>';return;}
+  const depthMap={'深入理解':5,'了解原理':3,'仅知道存在':1};
+  const depthColorMap={'深入理解':'#34d399','了解原理':'#38bdf8','仅知道存在':'#64748b'};
+  let html='';
+  methods.forEach(m=>{
+    const v=depthMap[m.depth]||1;
+    const c=depthColorMap[m.depth]||'#64748b';
+    const pct=v*20;
+    const paperInfo=m.from_papers?'来自: '+m.from_papers.join(', '):'';
+    html+='<div class="mastery-row">';
+    html+='<span class="mastery-label" title="'+paperInfo+'">'+m.method+'</span>';
+    html+='<div class="mastery-bar-track"><div class="mastery-bar-fill" style="width:'+pct+'%;background:'+c+'"></div></div>';
+    html+='<span class="mastery-depth" style="background:'+c+'22;color:'+c+'">'+m.depth+'</span>';
+    if(m.domain)html+='<span class="mastery-domain-tag">'+m.domain+'</span>';
+    html+='</div>';
+  });
+  document.getElementById('profile-sa-mastery').innerHTML=html;
+}
+
+function renderBlindspots(blindspots){
+  if(!blindspots.length){document.getElementById('profile-sa-blindspots').innerHTML='<p style="color:var(--success);font-size:13px">✅ 暂未发现明显盲区</p>';return;}
+  let html='';
+  const impColor={'高':'var(--danger)','中':'var(--warn)','低':'var(--text3)'};
+  blindspots.forEach(bs=>{
+    const ic=impColor[bs.importance]||'var(--text3)';
+    html+='<div style="background:var(--bg);padding:14px;border-radius:8px;margin-bottom:10px;border-left:3px solid '+ic+'">';
+    html+='<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px"><strong style="font-size:14px;color:var(--text)">'+bs.area+'</strong><span style="font-size:11px;padding:2px 8px;border-radius:4px;background:'+ic+'22;color:'+ic+'">重要性: '+bs.importance+'</span></div>';
+    if(bs.reason)html+='<div style="font-size:12px;color:var(--text2);margin-bottom:6px">'+bs.reason+'</div>';
+    if(bs.suggested_queries&&bs.suggested_queries.length)html+='<div style="font-size:11px;color:var(--primary)">🔍 建议搜索: '+bs.suggested_queries.map(q=>'<span style="padding:2px 6px;background:rgba(56,189,248,0.1);border-radius:3px;margin-right:4px">'+q+'</span>').join('')+'</div>';
+    html+='</div>';
+  });
+  document.getElementById('profile-sa-blindspots').innerHTML=html;
+}
+
+function renderUnread(unread){
+  if(!unread.length){document.getElementById('profile-sa-unread').innerHTML='<p style="color:var(--text3);font-size:13px">暂无推荐</p>';return;}
+  let html='';
+  unread.forEach(u=>{
+    html+='<div style="background:var(--bg);padding:14px;border-radius:8px;margin-bottom:10px;border-left:3px solid var(--primary2)">';
+    html+='<div style="font-size:14px;font-weight:600;color:var(--text);margin-bottom:4px">'+u.area+'</div>';
+    if(u.reason)html+='<div style="font-size:12px;color:var(--text2);margin-bottom:6px">'+u.reason+'</div>';
+    if(u.suggested_search)html+='<div style="font-size:11px;color:var(--primary2)">🔍 检索: <span style="padding:2px 6px;background:rgba(129,140,248,0.1);border-radius:3px">'+u.suggested_search+'</span></div>';
+    html+='</div>';
+  });
+  document.getElementById('profile-sa-unread').innerHTML=html;
+}
+
+function renderStyle(style){
+  if(!style||Object.keys(style).length===0){document.getElementById('profile-sa-style').innerHTML='<p style="color:var(--text3);font-size:13px">数据不足，无法生成画像</p>';return;}
+  let html='<div style="background:var(--bg);padding:18px;border-radius:10px;border:1px solid var(--border)">';
+  if(style.description)html+='<div style="font-size:14px;color:var(--text);margin-bottom:12px;line-height:1.7">'+style.description+'</div>';
+  html+='<div style="display:flex;flex-wrap:wrap;gap:8px">';
+  const styleMap={preference:'偏好',depth:'深度',trend:'趋势'};
+  for(const[sk,sv] of Object.entries(styleMap)){
+    if(style[sk])html+='<span style="font-size:12px;padding:6px 14px;border-radius:8px;background:rgba(129,140,248,0.1);color:var(--primary2);border:1px solid rgba(129,140,248,0.2)">'+sv+': '+style[sk]+'</span>';
+  }
+  html+='</div></div>';
+  document.getElementById('profile-sa-style').innerHTML=html;
 }
 </script>
 </body>

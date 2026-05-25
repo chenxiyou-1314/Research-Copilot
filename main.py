@@ -65,6 +65,11 @@ async def research_stream(req: ResearchRequest):
             )
             
             # 流式输出各阶段结果
+            # Coordinator
+            if result.get("search_queries"):
+                yield f"data: {json.dumps({'step': 'coordinator', 'queries': result['search_queries']}, ensure_ascii=False)}\n\n"
+            
+            # Search
             if result.get("papers"):
                 yield f"data: {json.dumps({'step': 'search', 'count': len(result['papers'])}, ensure_ascii=False)}\n\n"
             
@@ -72,8 +77,13 @@ async def research_stream(req: ResearchRequest):
                 titles = [p.get("title", "")[:50] for p in result["filtered_papers"][:5]]
                 yield f"data: {json.dumps({'step': 'filter', 'count': len(result['filtered_papers']), 'top_papers': titles}, ensure_ascii=False)}\n\n"
             
+            # Analysis
             if result.get("new_papers_count", 0) > 0:
                 yield f"data: {json.dumps({'step': 'index', 'new': result['new_papers_count'], 'total': result.get('total_papers_count', 0)}, ensure_ascii=False)}\n\n"
+            
+            # Critic评分
+            if result.get("critic_score"):
+                yield f"data: {json.dumps({'step': 'critic', 'overall': result['critic_score'], 'coverage': result.get('critic_coverage', 0), 'accuracy': result.get('critic_accuracy', 0), 'coherence': result.get('critic_coherence', 0), 'passed': result.get('critic_passed', True), 'rerun_count': result.get('rerun_count', 0)}, ensure_ascii=False)}\n\n"
             
             # 输出最终综述
             summary = result.get("summary", result.get("answer", "生成失败"))

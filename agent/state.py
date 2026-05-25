@@ -1,4 +1,4 @@
-"""Agent 状态定义 — LangGraph 使用的状态 Schema"""
+"""Agent 状态定义 — LangGraph 使用的状态 Schema（多Agent版）"""
 from typing import TypedDict, Literal, Optional
 from pydantic import BaseModel
 
@@ -19,28 +19,40 @@ class PaperMeta(BaseModel):
 
 class ResearchState(TypedDict, total=False):
     """LangGraph Agent 全局状态"""
-    # 用户输入
+    # ── 用户输入 ──
     query: str                       # 原始查询
     intent: Literal["search", "qa", "summarize", "refine"]  # 意图
 
-    # 检索结果
-    papers: list[dict]               # PaperMeta 列表（dict 形式便于序列化）
+    # ── Coordinator ──
+    search_queries: list[str]        # 改写后的检索query列表
+    focus_areas: list[str]           # 重点关注方向
+
+    # ── Search Agent ──
+    papers: list[dict]               # 检索到的所有论文
     filtered_papers: list[dict]      # 筛选后的论文
 
-    # RAG
+    # ── Analysis Agent ──
+    papers_context: str              # 论文列表文本（给Writing/Critic用）
     rag_context: str                 # 向量检索召回的上下文
     pdf_chunks_count: int            # 本次解析的 chunk 数
-
-    # 生成结果
-    summary: str                     # 综述 / 摘要结果
-    answer: str                      # QA 回答
-
-    # 记忆
     new_papers_count: int            # 本次新增论文数
     total_papers_count: int          # 论文库总数
 
-    # 流式输出
+    # ── Writing Agent ──
+    summary: str                     # 综述结果
+    answer: str                      # QA 回答
+
+    # ── Critic Agent ──
+    critic_passed: bool              # Critic是否通过
+    critic_score: float              # 总分
+    critic_coverage: float           # 覆盖度
+    critic_accuracy: float           # 准确性
+    critic_coherence: float          # 连贯性
+    critic_feedback: str             # Critic反馈
+    rerun_count: int                 # 重试次数
+
+    # ── 流式输出 ──
     stream_buffer: str               # SSE 流式缓冲
 
-    # 错误
+    # ── 错误 ──
     error: Optional[str]

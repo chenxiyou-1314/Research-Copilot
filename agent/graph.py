@@ -1,18 +1,19 @@
-"""LangGraph Agent 工作流定义"""
+"""LangGraph 多Agent工作流 — Coordinator/Search/Analysis/Writing/Critic"""
+import json
 from langgraph.graph import StateGraph, END
 from langchain_openai import ChatOpenAI
 
 from agent.state import ResearchState
-from agent.prompts import INTENT_CLASSIFICATION
-from tools.arxiv_search import search_arxiv
-from tools.scholar_search import search_scholar
-from tools.pdf_parser import parse_papers
+from agent.coordinator import plan_task
+from agent.search_agent import search_papers, filter_papers
+from agent.analysis_agent import AnalysisAgent
+from agent.writing_agent import generate_summary, generate_qa_answer, revise_summary
+from agent.critic_agent import evaluate_summary
 from tools.vector_store import VectorStore
-from tools.summary_writer import generate_summary, generate_qa_answer
 from memory.paper_store import PaperStore
 from memory.user_profile import UserProfile
+from agent.prompts import INTENT_CLASSIFICATION
 import config
-import json
 
 
 # ── 初始化 ──
@@ -36,120 +37,144 @@ llm = _get_llm()
 paper_store = PaperStore()
 user_profile = UserProfile()
 vector_store = VectorStore()
+analysis_agent = AnalysisAgent(vector_store, paper_store)
+
+# 最大重试次数（Critic不通过时最多重跑几次）
+MAX_RERUN = 2
 
 
 # ── 节点1: 意图识别 ──
 def intent_node(state: ResearchState) -> dict:
-    """识别用户意图: search / qa / summarize / refine"""
+    """识别用户意图"""
     query = state.get("query", "")
     prompt = INTENT_CLASSIFICATION.format(query=query)
     response = llm.invoke(prompt)
     intent = response.content.strip().lower()
-
     valid_intents = ["search", "qa", "summarize", "refine"]
     if intent not in valid_intents:
-        intent = "search"  # 默认走检索
-
+        intent = "search"
     return {"intent": intent}
 
 
-# ── 节点2: 论文检索 ──
-def search_node(state: ResearchState) -> dict:
-    """从 arXiv + Semantic Scholar 检索论文"""
+# ── 节点2: Coordinator规划 ──
+def coordinator_node(state: ResearchState) -> dict:
+    """Coordinator Agent: 规划任务，生成检索策略"""
     query = state["query"]
     preferences = user_profile.get_preferences_str()
-
-    # 并行检索两个源
-    arxiv_results = search_arxiv(query, max_results=config.ARXIV_MAX_RESULTS)
-    scholar_results = search_scholar(query, max_results=config.SCHOLAR_MAX_RESULTS)
-
-    # 去重合并
-    seen_ids = set()
-    all_papers = []
-    for p in arxiv_results + scholar_results:
-        if p["paper_id"] not in seen_ids:
-            seen_ids.add(p["paper_id"])
-            all_papers.append(p)
-
-    return {"papers": all_papers}
-
-
-# ── 节点3: 论文筛选 ──
-def filter_node(state: ResearchState) -> dict:
-    """根据引用数/年份/偏好筛选论文"""
-    papers = state.get("papers", [])
-    filtered = []
-    for p in papers:
-        if p.get("citations", 0) >= config.PAPER_MIN_CITATIONS:
-            if p.get("year", 0) >= config.PAPER_YEAR_FROM:
-                filtered.append(p)
-
-    # 如果筛选后太少，放宽引用限制
-    if len(filtered) < 3:
-        filtered = [p for p in papers if p.get("year", 0) >= config.PAPER_YEAR_FROM]
-    if len(filtered) < 3:
-        filtered = papers[:5]
-
-    return {"filtered_papers": filtered}
-
-
-# ── 节点4: PDF解析 + 向量化 ──
-def parse_and_index_node(state: ResearchState) -> dict:
-    """下载PDF → 解析切分 → Embedding → 入FAISS"""
-    papers = state.get("filtered_papers", [])
-    new_count = 0
-    chunks_count = 0
-
-    for p in papers:
-        if paper_store.is_indexed(p["paper_id"]):
-            continue
-
-        # 解析PDF（下载+切分）
-        chunks = parse_papers(p)
-        if chunks:
-            # 入向量库
-            vector_store.add_documents(p["paper_id"], chunks)
-            p["is_indexed"] = True
-            p["pdf_path"] = chunks[0].get("source", "")
-            new_count += 1
-            chunks_count += len(chunks)
-
-        # 存入论文库
-        paper_store.add_paper(p)
-
-    total = paper_store.count()
+    feedback = state.get("critic_feedback", "")
+    
+    plan = plan_task(llm, query, preferences, feedback)
+    
     return {
-        "new_papers_count": new_count,
-        "total_papers_count": total,
-        "pdf_chunks_count": chunks_count,
+        "search_queries": plan.get("search_queries", [query]),
+        "focus_areas": plan.get("focus_areas", []),
     }
 
 
-# ── 节点5: RAG检索 + 综述生成 ──
-def generate_node(state: ResearchState) -> dict:
-    """RAG检索相关上下文 → 生成综述/QA回答"""
+# ── 节点3: Search Agent ──
+def search_node(state: ResearchState) -> dict:
+    """Search Agent: 查询改写→多源检索→去重→筛选"""
+    query = state["query"]
+    search_queries = state.get("search_queries", [query])
+    
+    # 多源检索
+    papers = search_papers(
+        llm=llm,
+        query=query,
+        search_queries=search_queries,
+        max_results=config.ARXIV_MAX_RESULTS,
+    )
+    
+    # 筛选
+    filtered = filter_papers(
+        papers,
+        min_citations=config.PAPER_MIN_CITATIONS,
+        year_from=config.PAPER_YEAR_FROM,
+        max_papers=10,
+    )
+    
+    return {"papers": papers, "filtered_papers": filtered}
+
+
+# ── 节点4: Analysis Agent ──
+def analysis_node(state: ResearchState) -> dict:
+    """Analysis Agent: PDF解析→向量化→RAG检索"""
+    papers = state.get("filtered_papers", [])
+    
+    # 解析+向量化
+    result = analysis_agent.process_papers(papers)
+    
+    # RAG检索
+    query = state["query"]
+    rag_context = analysis_agent.rag_search(query, top_k=20)
+    
+    # 构建论文上下文
+    papers_context = ""
+    for p in papers:
+        authors_str = ', '.join(p.get('authors', [])[:3])
+        papers_context += f"\n[{authors_str}, {p.get('year')}] {p.get('title')}\n  摘要: {p.get('abstract', '')[:300]}\n"
+    
+    return {
+        "rag_context": rag_context,
+        "papers_context": papers_context,
+        "new_papers_count": result["new_count"],
+        "total_papers_count": result["total"],
+        "pdf_chunks_count": result["chunks_count"],
+    }
+
+
+# ── 节点5: Writing Agent ──
+def writing_node(state: ResearchState) -> dict:
+    """Writing Agent: 生成综述或QA回答"""
     query = state["query"]
     intent = state.get("intent", "summarize")
-
-    # RAG: 从向量库检索相关片段
-    rag_context = vector_store.search(query, top_k=20)
-    papers_context = ""
-    for p in state.get("filtered_papers", []):
-        papers_context += f"\n[{', '.join(p.get('authors', [])[:3])}, {p.get('year')}] {p.get('title')}\n  摘要: {p.get('abstract', '')[:300]}\n"
-
-    if intent == "qa":
+    rag_context = state.get("rag_context", "")
+    
+    # 如果是重写（Critic不通过），用修订模式
+    critic_feedback = state.get("critic_feedback", "")
+    existing_summary = state.get("summary", "")
+    
+    if critic_feedback and existing_summary:
+        summary = revise_summary(
+            llm, existing_summary, critic_feedback, query, rag_context
+        )
+    elif intent == "qa":
         answer = generate_qa_answer(llm, query, rag_context)
-        return {"answer": answer, "rag_context": rag_context}
+        return {"answer": answer}
     else:
+        papers_context = state.get("papers_context", "")
         summary = generate_summary(llm, query, papers_context, rag_context)
-        return {"summary": summary, "rag_context": rag_context}
+    
+    return {"summary": summary}
 
 
-# ── 节点6: 记忆更新 ──
+# ── 节点6: Critic Agent ──
+def critic_node(state: ResearchState) -> dict:
+    """Critic Agent: 评估综述质量，决定是否重写"""
+    summary = state.get("summary", "")
+    if not summary:
+        return {"critic_passed": True, "critic_score": 0.0, "critic_feedback": ""}
+    
+    query = state["query"]
+    papers_context = state.get("papers_context", "")
+    
+    result = evaluate_summary(llm, query, summary, papers_context)
+    
+    return {
+        "critic_passed": result["passed"],
+        "critic_score": result["overall_score"],
+        "critic_coverage": result["coverage_score"],
+        "critic_accuracy": result["accuracy_score"],
+        "critic_coherence": result["coherence_score"],
+        "critic_feedback": result["feedback"],
+        "rerun_count": state.get("rerun_count", 0),
+    }
+
+
+# ── 节点7: 记忆更新 ──
 def memory_node(state: ResearchState) -> dict:
     """持久化论文库 + 更新用户偏好"""
     paper_store.save()
-    # 根据查询更新用户偏好
     query = state.get("query", "")
     user_profile.update_from_query(query)
     return {}
@@ -158,13 +183,23 @@ def memory_node(state: ResearchState) -> dict:
 # ── 条件路由 ──
 def route_by_intent(state: ResearchState) -> str:
     intent = state.get("intent", "search")
-    if intent in ("search", "summarize"):
-        return "search"
+    if intent in ("search", "summarize", "refine"):
+        return "coordinator"
     elif intent == "qa":
-        return "qa"
-    elif intent == "refine":
-        return "search"  # 重新检索
-    return "search"
+        return "analysis"
+    return "coordinator"
+
+
+def route_by_critic(state: ResearchState) -> str:
+    """Critic路由：通过→记忆更新，未通过→重写"""
+    if state.get("critic_passed", True):
+        return "memory"
+    
+    rerun_count = state.get("rerun_count", 0)
+    if rerun_count >= MAX_RERUN:
+        return "memory"  # 超过最大重试次数，强制通过
+    
+    return "coordinator"  # 返回Coordinator重新规划
 
 
 # ── 构建图 ──
@@ -173,13 +208,14 @@ def build_graph() -> StateGraph:
 
     # 添加节点
     graph.add_node("intent", intent_node)
+    graph.add_node("coordinator", coordinator_node)
     graph.add_node("search", search_node)
-    graph.add_node("filter", filter_node)
-    graph.add_node("parse_and_index", parse_and_index_node)
-    graph.add_node("generate", generate_node)
+    graph.add_node("analysis", analysis_node)
+    graph.add_node("writing", writing_node)
+    graph.add_node("critic", critic_node)
     graph.add_node("memory", memory_node)
 
-    # 添加边
+    # 入口
     graph.set_entry_point("intent")
 
     # 意图路由
@@ -187,15 +223,27 @@ def build_graph() -> StateGraph:
         "intent",
         route_by_intent,
         {
-            "search": "search",
-            "qa": "generate",  # QA 直接走 RAG + 生成
+            "coordinator": "coordinator",
+            "analysis": "analysis",  # QA直接走Analysis
         },
     )
 
-    graph.add_edge("search", "filter")
-    graph.add_edge("filter", "parse_and_index")
-    graph.add_edge("parse_and_index", "generate")
-    graph.add_edge("generate", "memory")
+    # 主流程
+    graph.add_edge("coordinator", "search")
+    graph.add_edge("search", "analysis")
+    graph.add_edge("analysis", "writing")
+    graph.add_edge("writing", "critic")
+
+    # Critic路由
+    graph.add_conditional_edges(
+        "critic",
+        route_by_critic,
+        {
+            "memory": "memory",
+            "coordinator": "coordinator",  # 重跑
+        },
+    )
+
     graph.add_edge("memory", END)
 
     return graph.compile()

@@ -1,7 +1,6 @@
 """LangGraph Agent 工作流定义"""
 from langgraph.graph import StateGraph, END
 from langchain_openai import ChatOpenAI
-from langchain_community.chat_models import ChatOllama
 
 from agent.state import ResearchState
 from agent.prompts import INTENT_CLASSIFICATION
@@ -19,6 +18,7 @@ import json
 # ── 初始化 ──
 def _get_llm():
     if config.LLM_PROVIDER == "ollama":
+        from langchain_ollama import ChatOllama
         return ChatOllama(
             base_url=config.OLLAMA_BASE_URL,
             model=config.OLLAMA_MODEL,

@@ -326,13 +326,15 @@ async def home():
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Research Copilot</title>
 <style>
-:root{--bg:#0a0f1a;--surface:#111827;--surface2:#1e293b;--border:#1e3a5f;--primary:#38bdf8;--primary2:#818cf8;--accent:#a78bfa;--success:#34d399;--warn:#fbbf24;--danger:#f87171;--text:#e2e8f0;--text2:#94a3b8;--text3:#64748b;--radius:12px}
+:root{--bg:#0a0f1a;--surface:#111827;--surface2:#1e293b;--border:#1e3a5f;--primary:#38bdf8;--primary2:#818cf8;--accent:#a78bfa;--success:#34d399;--warn:#fbbf24;--danger:#f87171;--text:#e2e8f0;--text2:#94a3b8;--text3:#64748b;--radius:12px;--nav-bg:rgba(10,15,26,0.85);--canvas-grid:rgba(56,189,248,0.1);--canvas-axis:rgba(56,189,248,0.15);--canvas-fill:rgba(56,189,248,0.15);--canvas-stroke:#38bdf8;--canvas-point-stroke:#0a0f1a}
+[data-theme="light"]{--bg:#f8fafc;--surface:#ffffff;--surface2:#f1f5f9;--border:#cbd5e1;--primary:#0284c7;--primary2:#6366f1;--accent:#7c3aed;--success:#059669;--warn:#d97706;--danger:#dc2626;--text:#0f172a;--text2:#475569;--text3:#94a3b8;--nav-bg:rgba(248,250,252,0.85);--canvas-grid:rgba(2,132,199,0.08);--canvas-axis:rgba(2,132,199,0.12);--canvas-fill:rgba(2,132,199,0.12);--canvas-stroke:#0284c7;--canvas-point-stroke:#ffffff}
 *{margin:0;padding:0;box-sizing:border-box}
-body{font-family:'Inter',-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;background:var(--bg);color:var(--text);min-height:100vh;overflow-x:hidden}
+body{font-family:'Inter',-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;background:var(--bg);color:var(--text);min-height:100vh;overflow-x:hidden;transition:background .3s,color .3s}
 ::-webkit-scrollbar{width:6px}::-webkit-scrollbar-track{background:var(--bg)}::-webkit-scrollbar-thumb{background:var(--border);border-radius:3px}::-webkit-scrollbar-thumb:hover{background:var(--primary)}
-.nav{position:fixed;top:0;left:0;right:0;z-index:100;background:rgba(10,15,26,0.85);backdrop-filter:blur(20px);border-bottom:1px solid var(--border);padding:0 24px;height:60px;display:flex;align-items:center;justify-content:space-between}
+.nav{position:fixed;top:0;left:0;right:0;z-index:100;background:var(--nav-bg);backdrop-filter:blur(20px);border-bottom:1px solid var(--border);padding:0 24px;height:60px;display:flex;align-items:center;justify-content:space-between}
 .nav-brand{display:flex;align-items:center;gap:10px;font-weight:700;font-size:1.1em}
 .nav-brand .icon{width:32px;height:32px;background:linear-gradient(135deg,var(--primary),var(--primary2));border-radius:8px;display:flex;align-items:center;justify-content:center;font-size:18px}
+.nav-right{display:flex;align-items:center;gap:4px}
 .nav-links{display:flex;gap:4px}
 .nav-links button{background:none;border:none;color:var(--text2);padding:8px 16px;border-radius:8px;cursor:pointer;font-size:13px;font-weight:500;transition:all .2s}
 .nav-links button:hover,.nav-links button.active{color:var(--primary);background:rgba(56,189,248,0.1)}
@@ -423,6 +425,8 @@ body{font-family:'Inter',-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;
 .empty-state .icon{font-size:48px;margin-bottom:16px}
 .empty-state p{font-size:14px}
 /* Trend standalone */
+.theme-toggle{background:none;border:1px solid var(--border);color:var(--text2);width:36px;height:36px;border-radius:10px;cursor:pointer;font-size:16px;display:flex;align-items:center;justify-content:center;transition:all .2s;margin-left:8px}
+.theme-toggle:hover{border-color:var(--primary);color:var(--primary)}
 .trend-phase-badge{display:inline-flex;align-items:center;gap:8px;padding:10px 24px;border-radius:12px;font-size:1.3em;font-weight:800;border:2px solid}
 .trend-scores-grid{display:grid;grid-template-columns:repeat(4,1fr);gap:12px;margin:16px 0}
 .trend-score-card{background:var(--bg);padding:14px;border-radius:10px;text-align:center}
@@ -451,13 +455,16 @@ body{font-family:'Inter',-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;
 
 <nav class="nav">
   <div class="nav-brand"><div class="icon">🔬</div> Research Copilot</div>
-  <div class="nav-links">
-    <button class="active" onclick="switchTab('generate')">综述生成</button>
-    <button onclick="switchTab('papers')">论文库</button>
-    <button onclick="switchTab('qa')">问答</button>
-    <button onclick="switchTab('trend')">趋势预测</button>
-    <button onclick="switchTab('profile')">知识图谱</button>
-    <button onclick="switchTab('architecture')">架构</button>
+  <div class="nav-right">
+    <div class="nav-links">
+      <button class="active" onclick="switchTab('generate')">综述生成</button>
+      <button onclick="switchTab('papers')">论文库</button>
+      <button onclick="switchTab('qa')">问答</button>
+      <button onclick="switchTab('trend')">趋势预测</button>
+      <button onclick="switchTab('profile')">知识图谱</button>
+      <button onclick="switchTab('architecture')">架构</button>
+    </div>
+    <button class="theme-toggle" id="theme-btn" onclick="toggleTheme()" title="切换亮色/暗色主题">🌙</button>
   </div>
 </nav>
 
@@ -693,6 +700,17 @@ body{font-family:'Inter',-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;
 <script>
 const stepNames={start:'🚀 启动',coordinator:'🧭 Coordinator规划',search:'🔍 论文检索',filter:'📋 论文筛选',index:'💾 索引构建',critic:'🔍 Critic评估',novelty:'💡 新思路发现',decomposition:'🧬 方法解构与重组',trend:'📈 趋势预测',profile:'🗺️ 知识图谱',done:'✅ 完成'};
 let completedSteps=[];
+
+// ── Theme ──
+function getTheme(){return localStorage.getItem('rc-theme')||'dark';}
+function applyTheme(t){
+  document.documentElement.setAttribute('data-theme',t);
+  const btn=document.getElementById('theme-btn');
+  if(btn)btn.textContent=t==='dark'?'🌙':'☀️';
+  localStorage.setItem('rc-theme',t);
+}
+function toggleTheme(){applyTheme(getTheme()==='dark'?'light':'dark');}
+applyTheme(getTheme());
 
 function switchTab(t){document.querySelectorAll('.tab-content').forEach(e=>e.classList.remove('active'));document.querySelectorAll('.nav-links button').forEach(e=>e.classList.remove('active'));document.getElementById('tab-'+t).classList.add('active');event.target.classList.add('active');if(t==='papers')loadPapers();if(t==='generate')refreshStats();}
 
@@ -1163,7 +1181,8 @@ function drawRadarChart(domains){
   const R=Math.min(W,H)/2-50;
   const n=domains.length;
   const masteryMap={'精通':5,'熟悉':3,'了解':1};
-  const masteryColorMap={'精通':'#34d399','熟悉':'#38bdf8','了解':'#64748b'};
+  const isDark=getTheme()==='dark';
+  const masteryColorMap={'精通':isDark?'#34d399':'#059669','熟悉':isDark?'#38bdf8':'#0284c7','了解':isDark?'#64748b':'#94a3b8'};
 
   ctx.clearRect(0,0,W,H);
 
@@ -1171,23 +1190,22 @@ function drawRadarChart(domains){
   for(let ring=1;ring<=5;ring++){
     const r=R*ring/5;
     ctx.beginPath();ctx.arc(cx,cy,r,0,Math.PI*2);
-    ctx.strokeStyle='rgba(56,189,248,0.1)';ctx.lineWidth=1;ctx.stroke();
+    ctx.strokeStyle=isDark?'rgba(56,189,248,0.1)':'rgba(2,132,199,0.08)';ctx.lineWidth=1;ctx.stroke();
   }
 
   // Axis lines + labels
   const angleStep=Math.PI*2/n;
-  const labels=['了解','入门','熟悉','掌握','精通'];
   domains.forEach((d,i)=>{
     const a=-Math.PI/2+angleStep*i;
     const ex=cx+R*Math.cos(a),ey=cy+R*Math.sin(a);
     ctx.beginPath();ctx.moveTo(cx,cy);ctx.lineTo(ex,ey);
-    ctx.strokeStyle='rgba(56,189,248,0.15)';ctx.lineWidth=1;ctx.stroke();
+    ctx.strokeStyle=isDark?'rgba(56,189,248,0.15)':'rgba(2,132,199,0.12)';ctx.lineWidth=1;ctx.stroke();
     // Label
     const lx=cx+(R+28)*Math.cos(a),ly=cy+(R+28)*Math.sin(a);
-    ctx.fillStyle=masteryColorMap[d.mastery]||'#94a3b8';
+    ctx.fillStyle=masteryColorMap[d.mastery]||(isDark?'#94a3b8':'#475569');
     ctx.font='bold 12px Inter,sans-serif';ctx.textAlign='center';ctx.textBaseline='middle';
     ctx.fillText(d.name,lx,ly-8);
-    ctx.fillStyle='#64748b';ctx.font='10px Inter,sans-serif';
+    ctx.fillStyle=isDark?'#64748b':'#94a3b8';ctx.font='10px Inter,sans-serif';
     ctx.fillText(d.mastery+' · '+(d.papers_count||0)+'篇',lx,ly+8);
   });
 
@@ -1201,8 +1219,8 @@ function drawRadarChart(domains){
     if(i===0)ctx.moveTo(x,y);else ctx.lineTo(x,y);
   });
   ctx.closePath();
-  ctx.fillStyle='rgba(56,189,248,0.15)';ctx.fill();
-  ctx.strokeStyle='#38bdf8';ctx.lineWidth=2;ctx.stroke();
+  ctx.fillStyle=isDark?'rgba(56,189,248,0.15)':'rgba(2,132,199,0.12)';ctx.fill();
+  ctx.strokeStyle=isDark?'#38bdf8':'#0284c7';ctx.lineWidth=2;ctx.stroke();
 
   // Data points
   domains.forEach((d,i)=>{
@@ -1211,13 +1229,13 @@ function drawRadarChart(domains){
     const r=R*v/5;
     const x=cx+r*Math.cos(a),y=cy+r*Math.sin(a);
     ctx.beginPath();ctx.arc(x,y,5,0,Math.PI*2);
-    ctx.fillStyle=masteryColorMap[d.mastery]||'#94a3b8';ctx.fill();
-    ctx.strokeStyle='#0a0f1a';ctx.lineWidth=2;ctx.stroke();
+    ctx.fillStyle=masteryColorMap[d.mastery]||(isDark?'#94a3b8':'#475569');ctx.fill();
+    ctx.strokeStyle=isDark?'#0a0f1a':'#ffffff';ctx.lineWidth=2;ctx.stroke();
   });
 
   // Legend
   let legendHtml='';
-  const legItems=[{c:'#34d399',l:'精通 (5/5)'},{c:'#38bdf8',l:'熟悉 (3/5)'},{c:'#64748b',l:'了解 (1/5)'}];
+  const legItems=[{c:masteryColorMap['精通'],l:'精通 (5/5)'},{c:masteryColorMap['熟悉'],l:'熟悉 (3/5)'},{c:masteryColorMap['了解'],l:'了解 (1/5)'}];
   legItems.forEach(li=>{legendHtml+='<span class="legend-item"><span class="legend-dot" style="background:'+li.c+'"></span>'+li.l+'</span>';});
   document.getElementById('radar-legend').innerHTML=legendHtml;
 }
@@ -1225,7 +1243,8 @@ function drawRadarChart(domains){
 function renderMasteryBars(methods){
   if(!methods.length){document.getElementById('profile-sa-mastery').innerHTML='<p style="color:var(--text3);font-size:13px">暂无数据</p>';return;}
   const depthMap={'深入理解':5,'了解原理':3,'仅知道存在':1};
-  const depthColorMap={'深入理解':'#34d399','了解原理':'#38bdf8','仅知道存在':'#64748b'};
+  const isDark=getTheme()==='dark';
+  const depthColorMap={'深入理解':isDark?'#34d399':'#059669','了解原理':isDark?'#38bdf8':'#0284c7','仅知道存在':isDark?'#64748b':'#94a3b8'};
   let html='';
   methods.forEach(m=>{
     const v=depthMap[m.depth]||1;

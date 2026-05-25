@@ -57,6 +57,11 @@ class ResearchState(TypedDict, total=False):
     ideas: list                      # 生成的研究思路
     verified_ideas: list             # 新颖性验证后的思路
 
+    # ── Method Decomposition Agent ──
+    decomposition: list              # 方法解构结果（每篇论文的原子组件）
+    recombinations: list             # 跨论文方法重组方案
+    validated_recombinations: list   # 可行性验证后的重组方案
+
     # ── 流式输出 ──
     stream_buffer: str               # SSE 流式缓冲
 

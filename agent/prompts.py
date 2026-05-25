@@ -336,3 +336,133 @@ NOVELTY_VERIFICATION = """你是一个论文新颖性审查专家。请判断以
 - novelty_statement: 必须具体指出"与XX不同，本思路强调YY"
 - confidence: 0-1，你对新颖性判断的置信度（仅基于标题和摘要，无法100%确认）
 - 如果检索不到相关论文，confidence应较低（可能用词不同但已有人做过）"""
+
+# ── Method Decomposition Agent ──
+METHOD_DECOMPOSITION = """你是一个科研方法解构专家。请将以下论文中的方法拆解为原子组件，每个组件应是一个独立可替换的技术选择。
+
+研究方向: {query}
+
+待解构论文:
+{papers_context}
+
+请对每篇论文进行方法解构，输出JSON格式:
+
+```json
+[
+    {{
+        "paper_title": "论文标题缩写",
+        "paper_year": 2024,
+        "components": {{
+            "backbone": {{
+                "name": "ResNet-18 / ViT-B/16 / ...",
+                "detail": "具体使用方式的1句话说明",
+                "is_pretrained": true,
+                "parameter_count": "11.7M"
+            }},
+            "training_strategy": {{
+                "name": "fine-tuning / linear probing / prompt tuning / ...",
+                "detail": "具体策略的1句话说明",
+                "key_hyperparams": "lr=0.01, epochs=100, ..."
+            }},
+            "loss_function": {{
+                "name": "CE + KD / Focal Loss / ...",
+                "detail": "损失函数设计的1句话说明",
+                "components": ["cross-entropy", "knowledge distillation"]
+            }},
+            "data_augmentation": {{
+                "name": "RandAugment / Mixup / None",
+                "detail": "数据增强策略的1句话说明"
+            }},
+            "evaluation_protocol": {{
+                "name": "CIL protocol / FSCIL protocol",
+                "detail": "评估设置的1句话说明",
+                "datasets": ["CIFAR-100", "ImageNet-Subset"],
+                "metrics": ["accuracy", "forgetting measure"]
+            }}
+        }}
+    }}
+]
+```
+
+要求:
+- 每个组件必须是可以独立替换的最小单元
+- 如果论文某组件未明确说明，填 "Not specified"
+- backbone包括模型架构和特征提取方式
+- training_strategy包括训练方式、优化策略、正则化等
+- loss_function包括所有损失项的组成
+- data_augmentation包括训练时的数据增强
+- evaluation_protocol包括数据集、指标、实验设置
+- name字段尽量用领域内通用术语"""
+
+METHOD_RECOMBINATION = """你是一个科研方法创新专家。请基于以下论文的方法解构结果，提出跨论文的方法重组方案。
+
+研究方向: {query}
+
+论文方法解构:
+{decomposition}
+
+研究空白(Gap分析):
+{gaps}
+
+请提出3-4个方法重组方案，每个方案从不同论文中选取组件重新组合，输出JSON数组:
+
+```json
+[
+    {{
+        "name": "方案简称，如 ProtoCIL-Prompt",
+        "components": {{
+            "backbone": "来自哪篇论文的哪个backbone",
+            "training_strategy": "来自哪篇论文的哪个策略",
+            "loss_function": "来自哪篇论文的哪个损失",
+            "data_augmentation": "来自哪篇论文的哪个增强",
+            "evaluation_protocol": "建议的评估协议（不必来自论文）"
+        }},
+        "source_papers": ["论文1缩写", "论文2缩写"],
+        "motivation": "2-3句话，为什么这个组合值得尝试，解决哪个gap",
+        "expected_synergy": "组件间预期的协同效应（1-2句话）",
+        "target_gap": "该方案主要针对的gap编号或描述"
+    }}
+]
+```
+
+要求:
+- 每个方案至少混合2篇不同论文的组件
+- 不能简单地复制某篇论文的全部组件
+- motivation必须指向一个具体的gap
+- expected_synergy要说明为什么这些组件组合在一起比单独使用更好
+- 优先选择"高可行性 + 高新颖性"的组合
+- 至少一个方案包含跨领域的训练策略或损失函数"""
+
+RECOMBINATION_VALIDATION = """你是一个科研可行性审查专家。请评估以下方法重组方案的技术可行性。
+
+研究方向: {query}
+
+重组方案:
+{recombination}
+
+请从以下维度评估每个方案，输出JSON数组:
+
+```json
+[
+    {{
+        "name": "方案名称",
+        "compatibility_score": 4,
+        "implementation_difficulty": "中等",
+        "risk_factors": [
+            "风险1: 具体描述",
+            "风险2: 具体描述"
+        ],
+        "mitigation": "降低风险的具体措施",
+        "overall_feasibility": "高/中/低",
+        "quick_start": "2-3句话，如何快速验证这个方案（最小原型）",
+        "potential_pitfall": "最可能失败的地方"
+    }}
+]
+```
+
+评分标准:
+- compatibility_score(1-5): 组件之间的兼容性，5=天然兼容，1=严重冲突
+- implementation_difficulty: 基于研究生单GPU场景的判断
+- risk_factors: 技术层面可能导致失败的具体原因
+- mitigation: 针对主要风险的缓解措施
+- quick_start: 最小可运行验证方案，越具体越好"""

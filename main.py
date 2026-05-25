@@ -44,6 +44,10 @@ class SearchRequest(BaseModel):
     max_results: int = 10
 
 
+class DecomposeRequest(BaseModel):
+    query: str
+
+
 # ── SSE 流式综述生成 ──
 @app.post("/research/stream")
 async def research_stream(req: ResearchRequest):
@@ -104,6 +108,32 @@ async def research_stream(req: ResearchRequest):
                     })
                 yield f"data: {json.dumps(novelty_data, ensure_ascii=False)}\n\n"
             
+            # Method Decomposition
+            if result.get("decomposition"):
+                decomp_data = {
+                    "step": "decomposition",
+                    "papers_decomposed": len(result["decomposition"]),
+                    "decomposition": result["decomposition"],
+                    "recombinations_count": len(result.get("recombinations", [])),
+                    "validated": [],
+                }
+                for vr in result.get("validated_recombinations", []):
+                    decomp_data["validated"].append({
+                        "name": vr.get("name", ""),
+                        "compatibility_score": vr.get("compatibility_score", 3),
+                        "implementation_difficulty": vr.get("implementation_difficulty", ""),
+                        "risk_factors": vr.get("risk_factors", []),
+                        "mitigation": vr.get("mitigation", ""),
+                        "overall_feasibility": vr.get("overall_feasibility", ""),
+                        "quick_start": vr.get("quick_start", ""),
+                        "potential_pitfall": vr.get("potential_pitfall", ""),
+                        "source_papers": vr.get("original_recombination", {}).get("source_papers", []),
+                        "components": vr.get("original_recombination", {}).get("components", {}),
+                        "motivation": vr.get("original_recombination", {}).get("motivation", ""),
+                        "expected_synergy": vr.get("original_recombination", {}).get("expected_synergy", ""),
+                    })
+                yield f"data: {json.dumps(decomp_data, ensure_ascii=False)}\n\n"
+            
             # 输出最终综述
             summary = result.get("summary", result.get("answer", "生成失败"))
             yield f"data: {json.dumps({'step': 'done', 'result': summary}, ensure_ascii=False)}\n\n"
@@ -157,6 +187,32 @@ async def papers_qa(req: QARequest):
     answer = generate_qa_answer(llm, req.question, rag_context)
     
     return {"answer": answer, "has_context": True}
+
+
+# ── 方法解构与重组 ──
+@app.post("/decomposition")
+async def method_decomposition(req: DecomposeRequest):
+    """独立调用方法解构与重组（需要论文库中已有论文）。"""
+    from agent.graph import _get_llm, llm
+    from agent.decomposition_agent import run_decomposition
+    
+    papers = paper_store.get_all_papers()
+    if not papers:
+        return {"error": "论文库为空，请先生成综述索引论文", "decomposition": [], "recombinations": [], "validated_recombinations": []}
+    
+    # 构建论文上下文
+    papers_context = ""
+    for p in papers[:8]:
+        authors_str = ', '.join(p.get('authors', [])[:3])
+        papers_context += f"\n[{authors_str}, {p.get('year')}] {p.get('title')}\n  摘要: {p.get('abstract', '')[:300]}\n"
+    
+    result = run_decomposition(llm, papers_context, {}, req.query)
+    
+    return {
+        "decomposition": result["decomposition"],
+        "recombinations": result["recombinations"],
+        "validated_recombinations": result["validated_recombinations"],
+    }
 
 
 # ── 论文库状态 ──
@@ -324,7 +380,7 @@ body{font-family:'Inter',-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;
 <div class="tab-content active" id="tab-generate">
   <div class="hero">
     <h1>Research Copilot</h1>
-    <p>基于多Agent协作的科研文献智能检索与综述生成系统，支持意图识别、查询改写、RAG增强、自反思修订</p>
+    <p>基于多Agent协作的科研文献智能检索与综述生成系统，支持意图识别、查询改写、RAG增强、自反思修订、方法解构与重组</p>
   </div>
 
   <div class="stats">
@@ -364,6 +420,12 @@ body{font-family:'Inter',-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;
     <div id="novelty-ideas"></div>
   </div>
 
+  <div class="card" id="decomp-box" style="display:none;margin-top:12px;border-color:var(--success)">
+    <h3 style="color:var(--success);margin-bottom:16px">🧬 方法解构与重组 <span class="badge">Decomposition Agent</span></h3>
+    <div id="decomp-matrix" style="margin-bottom:16px"></div>
+    <div id="decomp-recombinations"></div>
+  </div>
+
   <div class="result-box" id="gen-result"></div>
 </div>
 
@@ -393,7 +455,7 @@ body{font-family:'Inter',-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;
 <!-- Tab: Architecture -->
 <div class="tab-content" id="tab-architecture">
   <h2 style="margin-bottom:8px">🏗️ 多Agent架构</h2>
-  <p style="color:var(--text2);font-size:14px;margin-bottom:24px">基于LangGraph构建的多Agent协作系统，5个专业Agent各司其职，Critic实现自我反思与修订闭环。</p>
+  <p style="color:var(--text2);font-size:14px;margin-bottom:24px">基于LangGraph构建的多Agent协作系统，7个专业Agent各司其职，Critic实现自我反思与修订闭环，Novelty+Decomposition实现从"读论文"到"造方法"的跃迁。</p>
 
   <div class="arch-flow">
     <div class="arch-node coordinator"><div class="name">Coordinator</div><div class="desc">规划·调度</div></div>
@@ -407,6 +469,8 @@ body{font-family:'Inter',-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;
     <div class="arch-node critic"><div class="name">Critic</div><div class="desc">评估·反馈</div></div>
     <div class="arch-arrow">→</div>
     <div class="arch-node" style="border-color:var(--accent)"><div class="name" style="color:var(--accent)">Novelty</div><div class="desc">思路·发现</div></div>
+    <div class="arch-arrow">→</div>
+    <div class="arch-node" style="border-color:var(--success)"><div class="name" style="color:var(--success)">Decomposition</div><div class="desc">解构·重组</div></div>
   </div>
   <div class="arch-loop">
     <span class="loop-arrow">↩</span> 未达标时反馈回Coordinator，重新检索补充论文并修订综述（最多2轮）
@@ -418,7 +482,8 @@ body{font-family:'Inter',-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;
     <div class="card" style="margin-bottom:12px"><h3>Analysis Agent <span class="badge">分析</span></h3><p style="color:var(--text2);font-size:13px;line-height:1.7">PDF下载→文本提取→切分→Embedding→FAISS增量索引→RAG向量检索。增量索引机制避免全量重算，论文库从0到N索引耗时保持线性增长。</p></div>
     <div class="card" style="margin-bottom:12px"><h3>Writing Agent <span class="badge">生成</span></h3><p style="color:var(--text2);font-size:13px;line-height:1.7">RAG增强综述生成：基于检索上下文+论文元数据生成结构化文献综述（背景→方法→挑战→趋势）。支持根据Critic反馈修订模式。</p></div>
     <div class="card" style="margin-bottom:12px"><h3>Critic Agent <span class="badge">评估</span></h3><p style="color:var(--text2);font-size:13px;line-height:1.7">三维度评估综述质量：覆盖度（是否遗漏重要方法）、准确性（引用和方法描述是否正确）、连贯性（逻辑结构是否清晰）。低于阈值触发Coordinator重跑。</p></div>
-    <div class="card" style="margin-bottom:12px"><h3>Novelty Agent <span class="badge">发现</span></h3><p style="color:var(--text2);font-size:13px;line-height:1.7">研究思路发现引擎：Gap分析（方法学/数据/理论/实践四维度空白提取）→跨域迁移（从其他领域寻找可迁移思路）→思路生成（2-3个具体可执行研究方向含技术路线）→新颖性验证（检索已有论文确认无人做过）。这是本系统区别于现有文献Agent的核心差异化能力。</p></div>
+    <div class="card" style="margin-bottom:12px"><h3>Novelty Agent <span class="badge">发现</span></h3><p style="color:var(--text2);font-size:13px;line-height:1.7">研究思路发现引擎：Gap分析（方法学/数据/理论/实践四维度空白提取）→跨域迁移（从其他领域寻找可迁移思路）→思路生成（2-3个具体可执行研究方向含技术路线）→新颖性验证（检索已有论文确认无人做过）。</p></div>
+    <div class="card" style="margin-bottom:12px"><h3>Decomposition Agent <span class="badge">解构</span></h3><p style="color:var(--text2);font-size:13px;line-height:1.7">方法解构与重组引擎：将每篇论文的方法拆解为5个原子组件（backbone/training_strategy/loss_function/data_augmentation/evaluation_protocol）→构建跨论文组件矩阵→跨论文方法重组（从不同论文中选取组件组合新方案）→可行性验证（兼容性评分/实施难度/风险评估/快速验证方案）。从"读论文"到"造方法"的跃迁。</p></div>
   </div>
 
   <h3 style="margin:24px 0 12px;color:var(--text)">技术栈</h3>
@@ -440,7 +505,7 @@ body{font-family:'Inter',-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;
 </div>
 
 <script>
-const stepNames={start:'🚀 启动',coordinator:'🧭 Coordinator规划',search:'🔍 论文检索',filter:'📋 论文筛选',index:'💾 索引构建',critic:'🔍 Critic评估',novelty:'💡 新思路发现',done:'✅ 完成'};
+const stepNames={start:'🚀 启动',coordinator:'🧭 Coordinator规划',search:'🔍 论文检索',filter:'📋 论文筛选',index:'💾 索引构建',critic:'🔍 Critic评估',novelty:'💡 新思路发现',decomposition:'🧬 方法解构与重组',done:'✅ 完成'};
 let completedSteps=[];
 
 function switchTab(t){document.querySelectorAll('.tab-content').forEach(e=>e.classList.remove('active'));document.querySelectorAll('.nav-links button').forEach(e=>e.classList.remove('active'));document.getElementById('tab-'+t).classList.add('active');event.target.classList.add('active');if(t==='papers')loadPapers();if(t==='generate')refreshStats();}
@@ -461,6 +526,7 @@ function updateProgress(step,data){
   if(step==='index'&&data.new)msg+=' — 新索引 '+data.new+' 篇';
   if(step==='critic'&&data.overall)msg+=' — 总分 '+data.overall+'/5 ('+(data.passed?'通过':'未通过，将重跑')+')';
   if(step==='novelty'&&data.ideas_count)msg+=' — 发现 '+data.ideas_count+' 个新思路';
+  if(step==='decomposition'&&data.papers_decomposed)msg+=' — 解构 '+data.papers_decomposed+' 篇论文，生成 '+data.recombinations_count+' 个重组方案';
   logEl.innerHTML+='<div class="step-'+step+'">'+msg+'</div>';
   logEl.scrollTop=logEl.scrollHeight;
 }
@@ -470,6 +536,8 @@ async function doGenerate(){
   const n=parseInt(document.getElementById('gen-count').value);
   const resultEl=document.getElementById('gen-result');const criticEl=document.getElementById('critic-box');const progressEl=document.getElementById('gen-progress');
   resultEl.style.display='none';criticEl.style.display='none';progressEl.style.display='block';
+  document.getElementById('novelty-box').style.display='none';
+  document.getElementById('decomp-box').style.display='none';
   completedSteps=[];
   document.getElementById('progress-steps').innerHTML='';
   document.getElementById('progress-log').innerHTML='';
@@ -519,6 +587,51 @@ async function doGenerate(){
               ideasHtml+='</div>';
             });
             document.getElementById('novelty-ideas').innerHTML=ideasHtml;
+          }
+          if(d.step==='decomposition'){
+            const db=document.getElementById('decomp-box');db.style.display='block';
+            // Component matrix
+            const papers=d.decomposition||[];
+            const compTypes=['backbone','training_strategy','loss_function','data_augmentation','evaluation_protocol'];
+            const compLabels={backbone:'🏗️ Backbone',training_strategy:'🎯 训练策略',loss_function:'📊 损失函数',data_augmentation:'🎨 数据增强',evaluation_protocol:'📏 评估协议'};
+            let matrixHtml='<h4 style="color:var(--text);font-size:13px;margin-bottom:8px">📊 方法组件矩阵</h4><div style="overflow-x:auto"><table style="width:100%;border-collapse:collapse;font-size:11px;min-width:600px">';
+            matrixHtml+='<tr><th style="padding:8px;border:1px solid var(--border);background:var(--surface2);color:var(--primary);text-align:left;min-width:80px">组件</th>';
+            papers.slice(0,6).forEach(p=>{matrixHtml+='<th style="padding:8px;border:1px solid var(--border);background:var(--surface2);color:var(--text);text-align:left;min-width:120px">'+(p.paper_title||'?')+'<br><span style="color:var(--text3);font-size:10px">'+(p.paper_year||'')+'</span></th>';});
+            matrixHtml+='</tr>';
+            compTypes.forEach(ct=>{
+              matrixHtml+='<tr><td style="padding:6px 8px;border:1px solid var(--border);color:var(--accent);font-weight:600;white-space:nowrap">'+compLabels[ct]+'</td>';
+              papers.slice(0,6).forEach(p=>{
+                const comp=(p.components||{})[ct]||{};
+                const name=typeof comp==='object'?comp.name||'N/A':comp;
+                matrixHtml+='<td style="padding:6px 8px;border:1px solid var(--border);color:var(--text2)">'+name+'</td>';
+              });
+              matrixHtml+='</tr>';
+            });
+            matrixHtml+='</table></div>';
+            document.getElementById('decomp-matrix').innerHTML=matrixHtml;
+            // Validated recombinations
+            const validated=d.validated||[];
+            let recombHtml='<h4 style="color:var(--text);font-size:13px;margin-bottom:8px">🔬 方法重组方案（已验证可行性）</h4>';
+            validated.forEach((v,i)=>{
+              const feasColor=v.overall_feasibility==='高'?'var(--success)':v.overall_feasibility==='中'?'var(--warn)':'var(--danger)';
+              const compatStars='★'.repeat(v.compatibility_score)+'☆'.repeat(5-v.compatibility_score);
+              recombHtml+='<div style="background:var(--bg);padding:16px;border-radius:8px;margin-bottom:10px;border-left:3px solid '+feasColor+'">';
+              recombHtml+='<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;flex-wrap:wrap;gap:8px"><strong style="font-size:14px;color:var(--text)">'+(i+1)+'. '+v.name+'</strong><div style="display:flex;gap:6px"><span style="font-size:11px;padding:2px 8px;border-radius:4px;background:rgba(52,211,153,0.15);color:'+feasColor+'">可行性: '+v.overall_feasibility+'</span><span style="font-size:11px;padding:2px 8px;border-radius:4px;background:rgba(56,189,248,0.15);color:var(--primary)">兼容性: '+compatStars+'</span></div></div>';
+              if(v.motivation)recombHtml+='<div style="font-size:12px;color:var(--text2);margin-bottom:8px">📌 '+v.motivation+'</div>';
+              // Component pills
+              if(v.components&&Object.keys(v.components).length>0){
+                recombHtml+='<div style="display:flex;flex-wrap:wrap;gap:4px;margin-bottom:8px">';
+                const cLabels={backbone:'🏗',training_strategy:'🎯',loss_function:'📊',data_augmentation:'🎨',evaluation_protocol:'📏'};
+                for(const[ck,cv] of Object.entries(v.components)){recombHtml+='<span style="font-size:10px;padding:3px 8px;border-radius:4px;background:rgba(167,139,250,0.1);color:var(--accent);border:1px solid rgba(167,139,250,0.2)">'+(cLabels[ck]||'')+' '+cv+'</span>';}
+                recombHtml+='</div>';
+              }
+              if(v.expected_synergy)recombHtml+='<div style="font-size:11px;color:var(--primary);margin-bottom:6px">⚡ 协同效应: '+v.expected_synergy+'</div>';
+              if(v.quick_start)recombHtml+='<div style="font-size:11px;color:var(--success);margin-bottom:6px;padding:8px;background:rgba(52,211,153,0.05);border-radius:4px">🚀 快速验证: '+v.quick_start+'</div>';
+              if(v.risk_factors&&v.risk_factors.length>0)recombHtml+='<div style="font-size:11px;color:var(--warn)">⚠️ 风险: '+v.risk_factors.join(' | ')+'</div>';
+              if(v.potential_pitfall)recombHtml+='<div style="font-size:11px;color:var(--danger);margin-top:4px">🪤 最可能失败: '+v.potential_pitfall+'</div>';
+              recombHtml+='</div>';
+            });
+            document.getElementById('decomp-recombinations').innerHTML=recombHtml;
           }
           if(d.step==='done'){
             resultEl.innerHTML=renderMarkdown(d.result);resultEl.style.display='block';

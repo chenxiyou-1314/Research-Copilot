@@ -10,6 +10,7 @@ from agent.analysis_agent import AnalysisAgent
 from agent.writing_agent import generate_summary, generate_qa_answer, revise_summary
 from agent.critic_agent import evaluate_summary
 from agent.novelty_agent import run_novelty_analysis
+from agent.decomposition_agent import run_decomposition
 from tools.vector_store import VectorStore
 from memory.paper_store import PaperStore
 from memory.user_profile import UserProfile
@@ -191,7 +192,26 @@ def novelty_node(state: ResearchState) -> dict:
     }
 
 
-# ── 节点8: 记忆更新 ──
+# ── 节点8: Method Decomposition Agent ──
+def decomposition_node(state: ResearchState) -> dict:
+    """Method Decomposition Agent: 方法解构→跨论文重组→可行性验证"""
+    papers_context = state.get("papers_context", "")
+    gaps = state.get("gaps", {})
+    query = state["query"]
+
+    if not papers_context:
+        return {}
+
+    result = run_decomposition(llm, papers_context, gaps, query)
+
+    return {
+        "decomposition": result["decomposition"],
+        "recombinations": result["recombinations"],
+        "validated_recombinations": result["validated_recombinations"],
+    }
+
+
+# ── 节点9: 记忆更新 ──
 def memory_node(state: ResearchState) -> dict:
     """持久化论文库 + 更新用户偏好"""
     paper_store.save()
@@ -234,6 +254,7 @@ def build_graph() -> StateGraph:
     graph.add_node("writing", writing_node)
     graph.add_node("critic", critic_node)
     graph.add_node("novelty", novelty_node)
+    graph.add_node("decomposition", decomposition_node)
     graph.add_node("memory", memory_node)
 
     # 入口
@@ -260,13 +281,14 @@ def build_graph() -> StateGraph:
         "critic",
         route_by_critic,
         {
-            "memory": "novelty",    # 通过→Novelty分析
+            "novelty": "novelty",         # 通过→Novelty分析
             "coordinator": "coordinator",  # 重跑
         },
     )
 
-    # Novelty → Memory
-    graph.add_edge("novelty", "memory")
+    # Novelty → Decomposition → Memory
+    graph.add_edge("novelty", "decomposition")
+    graph.add_edge("decomposition", "memory")
     graph.add_edge("memory", END)
 
     return graph.compile()

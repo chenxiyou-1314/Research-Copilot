@@ -373,7 +373,7 @@ body{font-family:'Inter',-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;
 @keyframes pulse{0%,100%{opacity:1}50%{opacity:.4}}
 .progress-log{font-size:12px;color:var(--text3);max-height:80px;overflow-y:auto}
 .progress-log div{padding:2px 0;border-bottom:1px solid rgba(30,58,95,0.3)}
-.progress-log .step-coordinator{color:var(--accent)}.progress-log .step-search{color:var(--primary)}.progress-log .step-filter{color:var(--success)}.progress-log .step-index{color:var(--warn)}.progress-log .step-critic{color:#f472b6}.progress-log .step-novelty{color:var(--accent)}.progress-log .step-done{color:var(--success);font-weight:600}
+.progress-log .step-coordinator{color:var(--accent)}.progress-log .step-search{color:var(--primary)}.progress-log .step-filter{color:var(--success)}.progress-log .step-index{color:var(--warn)}.progress-log .step-critic{color:#f472b6}.progress-log .step-novelty{color:var(--accent)}.progress-log .step-decomposition{color:var(--success)}.progress-log .step-trend{color:var(--warn)}.progress-log .step-profile{color:var(--primary2)}.progress-log .step-done{color:var(--success);font-weight:600}
 /* Result */
 .result-box{background:var(--surface);border:1px solid var(--border);border-radius:var(--radius);padding:24px;margin-top:16px;display:none;max-height:700px;overflow-y:auto;line-height:1.9;font-size:14px}
 .result-box h1,.result-box h2,.result-box h3{color:var(--primary);margin:20px 0 8px}

@@ -171,7 +171,7 @@ def critic_node(state: ResearchState) -> dict:
         "critic_accuracy": result["accuracy_score"],
         "critic_coherence": result["coherence_score"],
         "critic_feedback": result["feedback"],
-        "rerun_count": state.get("rerun_count", 0),
+        "rerun_count": state.get("rerun_count", 0) + (0 if result["passed"] else 1),
     }
 
 
@@ -238,8 +238,10 @@ def profile_node(state: ResearchState) -> dict:
     """Profile Graph Agent: 构建用户研究知识图谱"""
     query = state.get("query", "")
     papers = state.get("filtered_papers", state.get("papers", []))
+    summary = state.get("summary", "")
 
-    if not query and not papers:
+    # QA模式下summary为空，跳过profile构建（避免无意义的LLM调用）
+    if not summary and not papers:
         return {}
 
     # 获取历史查询
@@ -252,6 +254,9 @@ def profile_node(state: ResearchState) -> dict:
     for p in papers:
         if p.get("paper_id") not in existing_ids:
             all_papers.append(p)
+
+    if not all_papers and not query_history:
+        return {}
 
     result = build_profile_graph(llm, query_history, all_papers)
 
@@ -278,13 +283,13 @@ def route_by_intent(state: ResearchState) -> str:
 
 
 def route_by_critic(state: ResearchState) -> str:
-    """Critic路由：通过→记忆更新，未通过→重写"""
+    """Critic路由：通过→Novelty分析，未通过→重写"""
     if state.get("critic_passed", True):
-        return "memory"
+        return "novelty"
     
     rerun_count = state.get("rerun_count", 0)
     if rerun_count >= MAX_RERUN:
-        return "memory"  # 超过最大重试次数，强制通过
+        return "novelty"  # 超过最大重试次数，强制通过
     
     return "coordinator"  # 返回Coordinator重新规划
 

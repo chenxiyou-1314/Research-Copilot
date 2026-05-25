@@ -67,6 +67,9 @@ class ResearchState(TypedDict, total=False):
     evolution: dict                  # 方法演化追踪结果
     trend_forecast: dict             # 趋势预测结果
 
+    # ── Research Profile Graph ──
+    profile_graph: dict              # 用户研究知识图谱
+
     # ── 流式输出 ──
     stream_buffer: str               # SSE 流式缓冲
 

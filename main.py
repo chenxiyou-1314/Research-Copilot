@@ -52,6 +52,10 @@ class TrendRequest(BaseModel):
     query: str
 
 
+class ProfileRequest(BaseModel):
+    query: str = ""
+
+
 # ── SSE 流式综述生成 ──
 @app.post("/research/stream")
 async def research_stream(req: ResearchRequest):
@@ -147,6 +151,14 @@ async def research_stream(req: ResearchRequest):
                     "forecast": result["trend_forecast"],
                 }
                 yield f"data: {json.dumps(trend_data, ensure_ascii=False)}\n\n"
+            
+            # Research Profile Graph
+            if result.get("profile_graph"):
+                profile_data = {
+                    "step": "profile",
+                    "profile_graph": result["profile_graph"],
+                }
+                yield f"data: {json.dumps(profile_data, ensure_ascii=False)}\n\n"
             
             # 输出最终综述
             summary = result.get("summary", result.get("answer", "生成失败"))
@@ -247,6 +259,24 @@ async def trend_forecast(req: TrendRequest):
         "evolution": result["evolution"],
         "trend_forecast": result["trend_forecast"],
     }
+
+
+# ── 研究知识图谱 ──
+@app.post("/profile")
+async def research_profile(req: ProfileRequest):
+    """独立获取研究知识图谱。"""
+    from agent.graph import _get_llm, llm
+    from agent.profile_agent import build_profile_graph
+    
+    papers = paper_store.get_all_papers()
+    query_history = user_profile._profile.get("query_history", [])
+    
+    if not papers and not query_history:
+        return {"error": "暂无历史数据，请先生成综述或检索论文", "profile_graph": {}}
+    
+    result = build_profile_graph(llm, query_history, papers)
+    
+    return {"profile_graph": result}
 
 
 # ── 论文库状态 ──
@@ -414,7 +444,7 @@ body{font-family:'Inter',-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;
 <div class="tab-content active" id="tab-generate">
   <div class="hero">
     <h1>Research Copilot</h1>
-    <p>基于多Agent协作的科研文献智能检索与综述生成系统，支持意图识别、查询改写、RAG增强、自反思修订、方法解构与重组、趋势预测</p>
+    <p>基于多Agent协作的科研文献智能检索与综述生成系统，覆盖"读论文→造方法→判方向→懂自己"的完整科研决策链路</p>
   </div>
 
   <div class="stats">
@@ -467,6 +497,15 @@ body{font-family:'Inter',-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;
     <div id="trend-forecast"></div>
   </div>
 
+  <div class="card" id="profile-box" style="display:none;margin-top:12px;border-color:var(--primary2)">
+    <h3 style="color:var(--primary2);margin-bottom:16px">🗺️ 研究知识图谱 <span class="badge">Profile Agent</span></h3>
+    <div id="profile-domains" style="margin-bottom:16px"></div>
+    <div id="profile-methods" style="margin-bottom:16px"></div>
+    <div id="profile-blindspots" style="margin-bottom:16px"></div>
+    <div id="profile-unread" style="margin-bottom:16px"></div>
+    <div id="profile-style"></div>
+  </div>
+
   <div class="result-box" id="gen-result"></div>
 </div>
 
@@ -496,7 +535,7 @@ body{font-family:'Inter',-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;
 <!-- Tab: Architecture -->
 <div class="tab-content" id="tab-architecture">
   <h2 style="margin-bottom:8px">🏗️ 多Agent架构</h2>
-  <p style="color:var(--text2);font-size:14px;margin-bottom:24px">基于LangGraph构建的多Agent协作系统，8个专业Agent各司其职：Critic实现自我反思与修订闭环，Novelty发现研究空白，Decomposition重组方法，Trend预测方向趋势——从"读论文"到"造方法"再到"判方向"的全链路决策升级。</p>
+  <p style="color:var(--text2);font-size:14px;margin-bottom:24px">基于LangGraph构建的多Agent协作系统，9个专业Agent各司其职：Critic实现自我反思与修订闭环，Novelty发现研究空白，Decomposition重组方法，Trend预测趋势，Profile构建知识图谱——覆盖"读论文→造方法→判方向→懂自己"的完整科研决策链路。</p>
 
   <div class="arch-flow">
     <div class="arch-node coordinator"><div class="name">Coordinator</div><div class="desc">规划·调度</div></div>
@@ -514,6 +553,8 @@ body{font-family:'Inter',-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;
     <div class="arch-node" style="border-color:var(--success)"><div class="name" style="color:var(--success)">Decomposition</div><div class="desc">解构·重组</div></div>
     <div class="arch-arrow">→</div>
     <div class="arch-node" style="border-color:var(--warn)"><div class="name" style="color:var(--warn)">Trend</div><div class="desc">趋势·预测</div></div>
+    <div class="arch-arrow">→</div>
+    <div class="arch-node" style="border-color:var(--primary2)"><div class="name" style="color:var(--primary2)">Profile</div><div class="desc">图谱·画像</div></div>
   </div>
   <div class="arch-loop">
     <span class="loop-arrow">↩</span> 未达标时反馈回Coordinator，重新检索补充论文并修订综述（最多2轮）
@@ -528,6 +569,7 @@ body{font-family:'Inter',-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;
     <div class="card" style="margin-bottom:12px"><h3>Novelty Agent <span class="badge">发现</span></h3><p style="color:var(--text2);font-size:13px;line-height:1.7">研究思路发现引擎：Gap分析（方法学/数据/理论/实践四维度空白提取）→跨域迁移（从其他领域寻找可迁移思路）→思路生成（2-3个具体可执行研究方向含技术路线）→新颖性验证（检索已有论文确认无人做过）。</p></div>
     <div class="card" style="margin-bottom:12px"><h3>Decomposition Agent <span class="badge">解构</span></h3><p style="color:var(--text2);font-size:13px;line-height:1.7">方法解构与重组引擎：将每篇论文的方法拆解为5个原子组件（backbone/training_strategy/loss_function/data_augmentation/evaluation_protocol）→构建跨论文组件矩阵→跨论文方法重组（从不同论文中选取组件组合新方案）→可行性验证（兼容性评分/实施难度/风险评估/快速验证方案）。从"读论文"到"造方法"的跃迁。</p></div>
     <div class="card" style="margin-bottom:12px"><h3>Trend Agent <span class="badge">预测</span></h3><p style="color:var(--text2);font-size:13px;line-height:1.7">研究趋势预测引擎：时间线分析（按年份统计主题分布，识别新兴/衰退/稳定趋势）→方法演化追踪（追踪技术路线演变路径，识别范式转换点）→趋势预测（热度/饱和度/潜力/门槛四维评分 + 短中长期预测 + 投入建议 + 红绿旗信号）。从"这个方向有什么"到"这个方向值不值得做"的决策升级。</p></div>
+    <div class="card" style="margin-bottom:12px"><h3>Profile Agent <span class="badge">画像</span></h3><p style="color:var(--text2);font-size:13px;line-height:1.7">研究知识图谱构建引擎：基于用户历史查询和已索引论文，构建个人知识图谱——标注核心研究领域与掌握程度、已掌握方法及深度、知识盲区与建议搜索、高相关但未覆盖方向、研究风格画像（理论/工程导向、深入/广泛、前沿/经典）。每次检索后动态更新，越用越懂你。</p></div>
   </div>
 
   <h3 style="margin:24px 0 12px;color:var(--text)">技术栈</h3>
@@ -549,7 +591,7 @@ body{font-family:'Inter',-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;
 </div>
 
 <script>
-const stepNames={start:'🚀 启动',coordinator:'🧭 Coordinator规划',search:'🔍 论文检索',filter:'📋 论文筛选',index:'💾 索引构建',critic:'🔍 Critic评估',novelty:'💡 新思路发现',decomposition:'🧬 方法解构与重组',trend:'📈 趋势预测',done:'✅ 完成'};
+const stepNames={start:'🚀 启动',coordinator:'🧭 Coordinator规划',search:'🔍 论文检索',filter:'📋 论文筛选',index:'💾 索引构建',critic:'🔍 Critic评估',novelty:'💡 新思路发现',decomposition:'🧬 方法解构与重组',trend:'📈 趋势预测',profile:'🗺️ 知识图谱',done:'✅ 完成'};
 let completedSteps=[];
 
 function switchTab(t){document.querySelectorAll('.tab-content').forEach(e=>e.classList.remove('active'));document.querySelectorAll('.nav-links button').forEach(e=>e.classList.remove('active'));document.getElementById('tab-'+t).classList.add('active');event.target.classList.add('active');if(t==='papers')loadPapers();if(t==='generate')refreshStats();}
@@ -572,6 +614,7 @@ function updateProgress(step,data){
   if(step==='novelty'&&data.ideas_count)msg+=' — 发现 '+data.ideas_count+' 个新思路';
   if(step==='decomposition'&&data.papers_decomposed)msg+=' — 解构 '+data.papers_decomposed+' 篇论文，生成 '+data.recombinations_count+' 个重组方案';
   if(step==='trend'&&data.forecast)msg+=' — 方向阶段: '+(data.forecast.overall_phase||'分析中');
+  if(step==='profile'&&data.profile_graph)msg+=' — 构建知识图谱';
   logEl.innerHTML+='<div class="step-'+step+'">'+msg+'</div>';
   logEl.scrollTop=logEl.scrollHeight;
 }
@@ -584,6 +627,7 @@ async function doGenerate(){
   document.getElementById('novelty-box').style.display='none';
   document.getElementById('decomp-box').style.display='none';
   document.getElementById('trend-box').style.display='none';
+  document.getElementById('profile-box').style.display='none';
   completedSteps=[];
   document.getElementById('progress-steps').innerHTML='';
   document.getElementById('progress-log').innerHTML='';
@@ -767,6 +811,81 @@ async function doGenerate(){
               forecastHtml+='</div>';
             }
             document.getElementById('trend-forecast').innerHTML=forecastHtml;
+          }
+          if(d.step==='profile'){
+            const pb=document.getElementById('profile-box');pb.style.display='block';
+            const pg=d.profile_graph||{};
+            // Core domains
+            const domains=pg.core_domains||[];
+            if(domains.length>0){
+              let domHtml='<h4 style="color:var(--text);font-size:13px;margin-bottom:8px">🎯 核心研究领域</h4><div style="display:flex;flex-wrap:wrap;gap:8px">';
+              domains.forEach(dm=>{
+                const masteryColors={'精通':'var(--success)','熟悉':'var(--primary)','了解':'var(--text3)'};
+                const mc=masteryColors[dm.mastery]||'var(--text3)';
+                domHtml+='<div style="background:var(--bg);padding:14px;border-radius:10px;min-width:160px;flex:1;border-left:3px solid '+mc+'">';
+                domHtml+='<div style="font-size:14px;font-weight:700;color:var(--text);margin-bottom:4px">'+dm.name+'</div>';
+                domHtml+='<div style="display:flex;gap:6px;margin-bottom:6px"><span style="font-size:10px;padding:2px 6px;border-radius:3px;background:rgba(56,189,248,0.1);color:'+mc+'">'+dm.mastery+'</span><span style="font-size:10px;color:var(--text3)">'+(dm.papers_count||0)+'篇论文</span></div>';
+                if(dm.keywords)domHtml+='<div style="font-size:11px;color:var(--text2)">'+dm.keywords.join(' · ')+'</div>';
+                domHtml+='</div>';
+              });
+              domHtml+='</div>';
+              document.getElementById('profile-domains').innerHTML=domHtml;
+            }
+            // Mastered methods
+            const methods=pg.mastered_methods||[];
+            if(methods.length>0){
+              let methHtml='<h4 style="color:var(--text);font-size:13px;margin-bottom:8px">🔧 已掌握方法</h4><div style="display:flex;flex-wrap:wrap;gap:6px">';
+              methods.forEach(m=>{
+                const depthColors={'深入理解':'var(--success)','了解原理':'var(--primary)','仅知道存在':'var(--text3)'};
+                const dc=depthColors[m.depth]||'var(--text3)';
+                const title=m.from_papers?'来自: '+m.from_papers.join(', '):'';
+                methHtml+='<span style="font-size:11px;padding:6px 12px;border-radius:6px;background:var(--bg);border:1px solid '+dc+';color:var(--text);cursor:default" title="'+title+'"><span style="color:'+dc+'">●</span> '+m.method+' <span style="color:var(--text3);font-size:10px">'+m.depth+'</span></span>';
+              });
+              methHtml+='</div>';
+              document.getElementById('profile-methods').innerHTML=methHtml;
+            }
+            // Knowledge blindspots
+            const blindspots=pg.knowledge_blindspots||[];
+            if(blindspots.length>0){
+              let bsHtml='<h4 style="color:var(--text);font-size:13px;margin-bottom:8px">🕳️ 知识盲区</h4>';
+              blindspots.forEach(bs=>{
+                const impColors={'高':'var(--danger)','中':'var(--warn)','低':'var(--text3)'};
+                const ic=impColors[bs.importance]||'var(--text3)';
+                bsHtml+='<div style="background:var(--bg);padding:12px;border-radius:8px;margin-bottom:8px;border-left:3px solid '+ic+'">';
+                bsHtml+='<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:4px"><strong style="font-size:13px;color:var(--text)">'+bs.area+'</strong><span style="font-size:10px;padding:2px 6px;border-radius:3px;background:rgba(248,113,113,0.1);color:'+ic+'">重要性: '+bs.importance+'</span></div>';
+                if(bs.reason)bsHtml+='<div style="font-size:11px;color:var(--text2);margin-bottom:4px">'+bs.reason+'</div>';
+                if(bs.suggested_queries&&bs.suggested_queries.length>0)bsHtml+='<div style="font-size:10px;color:var(--primary)">🔍 建议搜索: '+bs.suggested_queries.join(' | ')+'</div>';
+                bsHtml+='</div>';
+              });
+              document.getElementById('profile-blindspots').innerHTML=bsHtml;
+            }
+            // Unread relevant
+            const unread=pg.unread_relevant||[];
+            if(unread.length>0){
+              let urHtml='<h4 style="color:var(--text);font-size:13px;margin-bottom:8px">📚 高相关但未覆盖</h4>';
+              unread.forEach(u=>{
+                urHtml+='<div style="background:var(--bg);padding:12px;border-radius:8px;margin-bottom:8px;border-left:3px solid var(--primary2)">';
+                urHtml+='<div style="font-size:13px;font-weight:600;color:var(--text);margin-bottom:4px">'+u.area+'</div>';
+                if(u.reason)urHtml+='<div style="font-size:11px;color:var(--text2);margin-bottom:4px">'+u.reason+'</div>';
+                if(u.suggested_search)urHtml+='<div style="font-size:10px;color:var(--primary2)">🔍 检索: '+u.suggested_search+'</div>';
+                urHtml+='</div>';
+              });
+              document.getElementById('profile-unread').innerHTML=urHtml;
+            }
+            // Research style
+            const style=pg.research_style||{};
+            if(Object.keys(style).length>0){
+              let stHtml='<h4 style="color:var(--text);font-size:13px;margin-bottom:8px">👤 研究风格画像</h4>';
+              stHtml+='<div style="background:var(--bg);padding:16px;border-radius:10px;border:1px solid var(--border)">';
+              if(style.description)stHtml+='<div style="font-size:14px;color:var(--text);margin-bottom:10px;line-height:1.6">'+style.description+'</div>';
+              stHtml+='<div style="display:flex;flex-wrap:wrap;gap:8px">';
+              const styleMap={preference:'偏好',depth:'深度',trend:'趋势'};
+              for(const[sk,sv] of Object.entries(styleMap)){
+                if(style[sk])stHtml+='<span style="font-size:11px;padding:4px 10px;border-radius:6px;background:rgba(129,140,248,0.1);color:var(--primary2);border:1px solid rgba(129,140,248,0.2)">'+sv+': '+style[sk]+'</span>';
+              }
+              stHtml+='</div></div>';
+              document.getElementById('profile-style').innerHTML=stHtml;
+            }
           }
           if(d.step==='done'){
             resultEl.innerHTML=renderMarkdown(d.result);resultEl.style.display='block';

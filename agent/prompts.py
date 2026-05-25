@@ -647,3 +647,65 @@ Gap分析:
 - investment_advice要具体可操作，不要"需要更多研究"这种废话
 - red_flags至少1条，green_flags至少2条
 - phase_reasoning要有数据支撑（引用时间线分析中的年份分布和趋势）"""
+
+# ── Research Profile Graph Agent ──
+PROFILE_EXTRACTION = """你是一个科研知识图谱分析师。请根据用户的历史查询和已索引论文，构建该用户的研究知识图谱。
+
+用户历史查询:
+{query_history}
+
+已索引论文列表:
+{papers_list}
+
+请从以下维度构建知识图谱，输出JSON格式:
+
+```json
+{{
+    "core_domains": [
+        {{
+            "name": "核心研究领域名",
+            "mastery": "精通/熟悉/了解",
+            "papers_count": 3,
+            "keywords": ["关键词1", "关键词2"],
+            "related_queries": ["历史查询1"]
+        }}
+    ],
+    "mastered_methods": [
+        {{
+            "method": "方法名称",
+            "domain": "所属领域",
+            "from_papers": ["论文1缩写"],
+            "depth": "深入理解/了解原理/仅知道存在"
+        }}
+    ],
+    "knowledge_blindspots": [
+        {{
+            "area": "盲区描述",
+            "importance": "高/中/低",
+            "reason": "为什么这是盲区（与已有知识的关联但缺失）",
+            "suggested_queries": ["建议搜索的query"]
+        }}
+    ],
+    "unread_relevant": [
+        {{
+            "area": "高相关但用户可能未读的方向",
+            "reason": "为什么判定高相关",
+            "suggested_search": "建议的检索关键词"
+        }}
+    ],
+    "research_style": {{
+        "preference": "理论导向/工程导向/混合",
+        "depth": "深入窄领域/广泛跨领域",
+        "trend": "追踪前沿/深耕经典",
+        "description": "1-2句话概括用户的研究画像"
+    }}
+}}
+```
+
+要求:
+- core_domains: 用户核心研究领域，按相关度排序，2-4个
+- mastered_methods: 从论文中提取用户接触过的方法，5-8个
+- knowledge_blindspots: 与用户方向相关但知识覆盖缺失的领域，2-3个
+- unread_relevant: 高度相关但论文库中尚未覆盖的方向，2-3个
+- research_style: 基于查询模式和论文分布推断用户研究风格
+- 所有分析基于给定的数据，不要编造论文或方法"""

@@ -51,6 +51,12 @@ class ResearchState(TypedDict, total=False):
     critic_feedback: str             # Critic反馈
     rerun_count: int                 # 重试次数
 
+    # ── Novelty Agent ──
+    gaps: dict                       # Gap分析结果
+    transfers: list                  # 跨域迁移结果
+    ideas: list                      # 生成的研究思路
+    verified_ideas: list             # 新颖性验证后的思路
+
     # ── 流式输出 ──
     stream_buffer: str               # SSE 流式缓冲
 

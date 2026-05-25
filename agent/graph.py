@@ -9,6 +9,7 @@ from agent.search_agent import search_papers, filter_papers
 from agent.analysis_agent import AnalysisAgent
 from agent.writing_agent import generate_summary, generate_qa_answer, revise_summary
 from agent.critic_agent import evaluate_summary
+from agent.novelty_agent import run_novelty_analysis
 from tools.vector_store import VectorStore
 from memory.paper_store import PaperStore
 from memory.user_profile import UserProfile
@@ -171,7 +172,26 @@ def critic_node(state: ResearchState) -> dict:
     }
 
 
-# ── 节点7: 记忆更新 ──
+# ── 节点7: Novelty Agent ──
+def novelty_node(state: ResearchState) -> dict:
+    """Novelty Agent: Gap分析→跨域迁移→思路生成→新颖性验证"""
+    summary = state.get("summary", "")
+    query = state["query"]
+    
+    if not summary:
+        return {}
+    
+    result = run_novelty_analysis(llm, summary, query)
+    
+    return {
+        "gaps": result["gaps"],
+        "transfers": result["transfers"],
+        "ideas": result["ideas"],
+        "verified_ideas": result["verified_ideas"],
+    }
+
+
+# ── 节点8: 记忆更新 ──
 def memory_node(state: ResearchState) -> dict:
     """持久化论文库 + 更新用户偏好"""
     paper_store.save()
@@ -213,6 +233,7 @@ def build_graph() -> StateGraph:
     graph.add_node("analysis", analysis_node)
     graph.add_node("writing", writing_node)
     graph.add_node("critic", critic_node)
+    graph.add_node("novelty", novelty_node)
     graph.add_node("memory", memory_node)
 
     # 入口
@@ -239,11 +260,13 @@ def build_graph() -> StateGraph:
         "critic",
         route_by_critic,
         {
-            "memory": "memory",
+            "memory": "novelty",    # 通过→Novelty分析
             "coordinator": "coordinator",  # 重跑
         },
     )
 
+    # Novelty → Memory
+    graph.add_edge("novelty", "memory")
     graph.add_edge("memory", END)
 
     return graph.compile()

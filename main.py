@@ -85,6 +85,25 @@ async def research_stream(req: ResearchRequest):
             if result.get("critic_score"):
                 yield f"data: {json.dumps({'step': 'critic', 'overall': result['critic_score'], 'coverage': result.get('critic_coverage', 0), 'accuracy': result.get('critic_accuracy', 0), 'coherence': result.get('critic_coherence', 0), 'passed': result.get('critic_passed', True), 'rerun_count': result.get('rerun_count', 0)}, ensure_ascii=False)}\n\n"
             
+            # Novelty分析
+            if result.get("verified_ideas"):
+                novelty_data = {
+                    "step": "novelty",
+                    "gaps": result.get("gaps", {}),
+                    "transfers_count": len(result.get("transfers", [])),
+                    "ideas_count": len(result.get("ideas", [])),
+                    "verified": [],
+                }
+                for vi in result["verified_ideas"]:
+                    novelty_data["verified"].append({
+                        "title": vi.get("idea_title", ""),
+                        "is_novel": vi.get("is_novel", True),
+                        "confidence": vi.get("confidence", 0),
+                        "novelty_statement": vi.get("novelty_statement", ""),
+                        "similar_works": vi.get("similar_works", []),
+                    })
+                yield f"data: {json.dumps(novelty_data, ensure_ascii=False)}\n\n"
+            
             # 输出最终综述
             summary = result.get("summary", result.get("answer", "生成失败"))
             yield f"data: {json.dumps({'step': 'done', 'result': summary}, ensure_ascii=False)}\n\n"
@@ -234,7 +253,7 @@ body{font-family:'Inter',-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;
 @keyframes pulse{0%,100%{opacity:1}50%{opacity:.4}}
 .progress-log{font-size:12px;color:var(--text3);max-height:80px;overflow-y:auto}
 .progress-log div{padding:2px 0;border-bottom:1px solid rgba(30,58,95,0.3)}
-.progress-log .step-coordinator{color:var(--accent)}.progress-log .step-search{color:var(--primary)}.progress-log .step-filter{color:var(--success)}.progress-log .step-index{color:var(--warn)}.progress-log .step-critic{color:#f472b6}.progress-log .step-done{color:var(--success);font-weight:600}
+.progress-log .step-coordinator{color:var(--accent)}.progress-log .step-search{color:var(--primary)}.progress-log .step-filter{color:var(--success)}.progress-log .step-index{color:var(--warn)}.progress-log .step-critic{color:#f472b6}.progress-log .step-novelty{color:var(--accent)}.progress-log .step-done{color:var(--success);font-weight:600}
 /* Result */
 .result-box{background:var(--surface);border:1px solid var(--border);border-radius:var(--radius);padding:24px;margin-top:16px;display:none;max-height:700px;overflow-y:auto;line-height:1.9;font-size:14px}
 .result-box h1,.result-box h2,.result-box h3{color:var(--primary);margin:20px 0 8px}
@@ -338,6 +357,13 @@ body{font-family:'Inter',-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;
     <div class="critic-feedback" id="critic-feedback"></div>
   </div>
 
+  <div class="card" id="novelty-box" style="display:none;margin-top:12px;border-color:var(--accent)">
+    <h3 style="color:var(--accent);margin-bottom:16px">💡 研究思路发现 <span class="badge">Novelty Agent</span></h3>
+    <div id="novelty-gaps" style="margin-bottom:16px"></div>
+    <div id="novelty-transfers" style="margin-bottom:16px"></div>
+    <div id="novelty-ideas"></div>
+  </div>
+
   <div class="result-box" id="gen-result"></div>
 </div>
 
@@ -379,6 +405,8 @@ body{font-family:'Inter',-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;
     <div class="arch-node writing"><div class="name">Writing</div><div class="desc">生成·修订</div></div>
     <div class="arch-arrow">→</div>
     <div class="arch-node critic"><div class="name">Critic</div><div class="desc">评估·反馈</div></div>
+    <div class="arch-arrow">→</div>
+    <div class="arch-node" style="border-color:var(--accent)"><div class="name" style="color:var(--accent)">Novelty</div><div class="desc">思路·发现</div></div>
   </div>
   <div class="arch-loop">
     <span class="loop-arrow">↩</span> 未达标时反馈回Coordinator，重新检索补充论文并修订综述（最多2轮）
@@ -390,6 +418,7 @@ body{font-family:'Inter',-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;
     <div class="card" style="margin-bottom:12px"><h3>Analysis Agent <span class="badge">分析</span></h3><p style="color:var(--text2);font-size:13px;line-height:1.7">PDF下载→文本提取→切分→Embedding→FAISS增量索引→RAG向量检索。增量索引机制避免全量重算，论文库从0到N索引耗时保持线性增长。</p></div>
     <div class="card" style="margin-bottom:12px"><h3>Writing Agent <span class="badge">生成</span></h3><p style="color:var(--text2);font-size:13px;line-height:1.7">RAG增强综述生成：基于检索上下文+论文元数据生成结构化文献综述（背景→方法→挑战→趋势）。支持根据Critic反馈修订模式。</p></div>
     <div class="card" style="margin-bottom:12px"><h3>Critic Agent <span class="badge">评估</span></h3><p style="color:var(--text2);font-size:13px;line-height:1.7">三维度评估综述质量：覆盖度（是否遗漏重要方法）、准确性（引用和方法描述是否正确）、连贯性（逻辑结构是否清晰）。低于阈值触发Coordinator重跑。</p></div>
+    <div class="card" style="margin-bottom:12px"><h3>Novelty Agent <span class="badge">发现</span></h3><p style="color:var(--text2);font-size:13px;line-height:1.7">研究思路发现引擎：Gap分析（方法学/数据/理论/实践四维度空白提取）→跨域迁移（从其他领域寻找可迁移思路）→思路生成（2-3个具体可执行研究方向含技术路线）→新颖性验证（检索已有论文确认无人做过）。这是本系统区别于现有文献Agent的核心差异化能力。</p></div>
   </div>
 
   <h3 style="margin:24px 0 12px;color:var(--text)">技术栈</h3>
@@ -411,7 +440,7 @@ body{font-family:'Inter',-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;
 </div>
 
 <script>
-const stepNames={start:'🚀 启动',coordinator:'🧭 Coordinator规划',search:'🔍 论文检索',filter:'📋 论文筛选',index:'💾 索引构建',critic:'🔍 Critic评估',done:'✅ 完成'};
+const stepNames={start:'🚀 启动',coordinator:'🧭 Coordinator规划',search:'🔍 论文检索',filter:'📋 论文筛选',index:'💾 索引构建',critic:'🔍 Critic评估',novelty:'💡 新思路发现',done:'✅ 完成'};
 let completedSteps=[];
 
 function switchTab(t){document.querySelectorAll('.tab-content').forEach(e=>e.classList.remove('active'));document.querySelectorAll('.nav-links button').forEach(e=>e.classList.remove('active'));document.getElementById('tab-'+t).classList.add('active');event.target.classList.add('active');if(t==='papers')loadPapers();if(t==='generate')refreshStats();}
@@ -431,6 +460,7 @@ function updateProgress(step,data){
   if(step==='filter'&&data.count)msg+=' — 筛选后 '+data.count+' 篇';
   if(step==='index'&&data.new)msg+=' — 新索引 '+data.new+' 篇';
   if(step==='critic'&&data.overall)msg+=' — 总分 '+data.overall+'/5 ('+(data.passed?'通过':'未通过，将重跑')+')';
+  if(step==='novelty'&&data.ideas_count)msg+=' — 发现 '+data.ideas_count+' 个新思路';
   logEl.innerHTML+='<div class="step-'+step+'">'+msg+'</div>';
   logEl.scrollTop=logEl.scrollHeight;
 }
@@ -463,6 +493,32 @@ async function doGenerate(){
               '<div class="critic-item"><div class="score '+scoreClass(d.accuracy)+'">'+d.accuracy+'</div><div class="label">准确性</div></div>'+
               '<div class="critic-item"><div class="score '+scoreClass(d.coherence)+'">'+d.coherence+'</div><div class="label">连贯性</div></div>'+
               '<div class="critic-item"><div class="score '+scoreClass(d.overall)+'">'+d.overall+'</div><div class="label">总分</div></div>';
+          }
+          if(d.step==='novelty'){
+            const nb=document.getElementById('novelty-box');nb.style.display='block';
+            // Gaps
+            const gaps=d.gaps||{};
+            let gapsHtml='<h4 style="color:var(--text);font-size:13px;margin-bottom:8px">📊 Gap分析</h4><div style="display:grid;grid-template-columns:1fr 1fr;gap:8px">';
+            const gapLabels={methodological_gaps:'方法学空白',data_gaps:'数据空白',theoretical_gaps:'理论空白',practical_gaps:'实践空白'};
+            for(const[k,v] of Object.entries(gapLabels)){
+              const items=(gaps[k]||[]).slice(0,2);
+              gapsHtml+='<div style="background:var(--bg);padding:10px;border-radius:8px"><div style="font-size:11px;color:var(--text3);margin-bottom:4px">'+v+'</div>'+items.map(i=>'<div style="font-size:12px;color:var(--text2);margin:3px 0;padding-left:8px;border-left:2px solid var(--accent)">'+i+'</div>').join('')+'</div>';
+            }
+            gapsHtml+='</div>';
+            document.getElementById('novelty-gaps').innerHTML=gapsHtml;
+            // Verified ideas
+            const verified=d.verified||[];
+            let ideasHtml='<h4 style="color:var(--text);font-size:13px;margin-bottom:8px">🎯 研究思路（已验证新颖性）</h4>';
+            verified.forEach((v,i)=>{
+              const novColor=v.is_novel?'var(--success)':'var(--warn)';
+              const novText=v.is_novel?'✅ 新颖':'⚠️ 存在类似工作';
+              ideasHtml+='<div style="background:var(--bg);padding:16px;border-radius:8px;margin-bottom:10px;border-left:3px solid '+novColor+'">';
+              ideasHtml+='<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px"><strong style="font-size:14px;color:var(--text)">'+(i+1)+'. '+v.title+'</strong><span style="font-size:11px;padding:2px 8px;border-radius:4px;background:'+(v.is_novel?'rgba(52,211,153,0.15)':'rgba(251,191,36,0.15)')+';color:'+novColor+'">'+novText+' (置信度:'+(v.confidence*100).toFixed(0)+'%)</span></div>';
+              if(v.novelty_statement)ideasHtml+='<div style="font-size:12px;color:var(--accent);margin-bottom:6px">💡 '+v.novelty_statement+'</div>';
+              if(v.similar_works&&v.similar_works.length>0)ideasHtml+='<div style="font-size:11px;color:var(--text3)">相关已有工作: '+v.similar_works.join(' | ')+'</div>';
+              ideasHtml+='</div>';
+            });
+            document.getElementById('novelty-ideas').innerHTML=ideasHtml;
           }
           if(d.step==='done'){
             resultEl.innerHTML=renderMarkdown(d.result);resultEl.style.display='block';

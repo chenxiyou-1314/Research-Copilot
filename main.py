@@ -264,7 +264,7 @@ async def trend_forecast(req: TrendRequest):
 # ── 研究知识图谱 ──
 @app.post("/profile")
 async def research_profile(req: ProfileRequest):
-    """独立获取研究知识图谱。"""
+    """独立获取研究知识图谱（含方法组件关系图）。"""
     from agent.graph import _get_llm, llm
     from agent.profile_agent import build_profile_graph
     
@@ -274,7 +274,13 @@ async def research_profile(req: ProfileRequest):
     if not papers and not query_history:
         return {"error": "暂无历史数据，请先生成综述或检索论文", "profile_graph": {}}
     
-    result = build_profile_graph(llm, query_history, papers)
+    # 尝试从 paper_store 加载已有的 decomposition 数据
+    decomposition = []
+    for p in papers:
+        if p.get("decomposition"):
+            decomposition.append(p["decomposition"])
+    
+    result = build_profile_graph(llm, query_history, papers, decomposition=decomposition if decomposition else None)
     
     return {"profile_graph": result}
 
@@ -606,6 +612,18 @@ body{font-family:'Inter',-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;
       <h3>🎯 领域掌握度雷达图</h3>
       <div class="profile-canvas-wrap"><canvas id="profile-radar" width="420" height="420"></canvas></div>
       <div class="legend-row" id="radar-legend"></div>
+    </div>
+
+    <!-- Method Graph -->
+    <div class="card" style="margin-bottom:16px">
+      <h3>🔗 方法组件关系图 <span class="badge">Decomposition</span></h3>
+      <p style="font-size:12px;color:var(--text3);margin:8px 0">节点=方法组件，边=关联关系。点击节点查看详情，滚轮缩放，拖拽移动。</p>
+      <div class="profile-canvas-wrap"><canvas id="method-graph-canvas" width="700" height="450" style="cursor:grab;border:1px solid var(--border)"></canvas></div>
+      <div id="method-graph-detail" style="margin-top:12px;display:none">
+        <div class="card" style="background:var(--bg)">
+          <div id="method-graph-detail-content" style="font-size:13px;line-height:1.7"></div>
+        </div>
+      </div>
     </div>
 
     <!-- Mastery Bars -->
@@ -1169,6 +1187,8 @@ async function doProfileStandalone(){
     resultEl.style.display='block';
     // Radar chart
     drawRadarChart(pg.core_domains||[]);
+    // Method graph
+    drawMethodGraph(pg.method_graph||{nodes:[],edges:[]});
     // Mastery bars
     renderMasteryBars(pg.mastered_methods||[]);
     // Blindspots
@@ -1267,6 +1287,147 @@ function renderMasteryBars(methods){
     html+='</div>';
   });
   document.getElementById('profile-sa-mastery').innerHTML=html;
+}
+
+// ── Method Graph: Force-directed layout ──
+function drawMethodGraph(graph){
+  const canvas=document.getElementById('method-graph-canvas');
+  if(!canvas)return;
+  const ctx=canvas.getContext('2d');
+  const W=canvas.width,H=canvas.height;
+  const nodes=graph.nodes||[];
+  const edges=graph.edges||[];
+  if(!nodes.length){ctx.clearRect(0,0,W,H);ctx.fillStyle=getTheme()==='dark'?'#64748b':'#94a3b8';ctx.font='14px Inter,sans-serif';ctx.textAlign='center';ctx.fillText('暂无方法组件数据（需先生成综述以触发 Decomposition）',W/2,H/2);return;}
+
+  const isDark=getTheme()==='dark';
+  const typeColors={backbone:isDark?'#f472b6':'#db2777',classifier:isDark?'#38bdf8':'#0284c7',loss:isDark?'#fbbf24':'#d97706',augmentation:isDark?'#34d399':'#059669',training_strategy:isDark?'#a78bfa':'#7c3aed',evaluation:isDark?'#fb923c':'#ea580c'};
+  const relColors={相似:isDark?'#94a3b8':'#64748b',改进:isDark?'#38bdf8':'#0284c7',组合:isDark?'#34d399':'#059669',互补:isDark?'#a78bfa':'#7c3aed'};
+
+  // Init positions randomly around center
+  const cx=W/2,cy=H/2;
+  nodes.forEach((n,i)=>{
+    if(!n._x){const a=Math.PI*2*i/nodes.length;n._x=cx+Math.cos(a)*(120+Math.random()*60);n._y=cy+Math.sin(a)*(80+Math.random()*40);n._vx=0;n._vy=0;}
+  });
+
+  // Build id→index map
+  const idMap={};nodes.forEach((n,i)=>{idMap[n.id]=i;});
+
+  // Force simulation
+  function simulate(){
+    const repulse=3000,attract=0.005,center=0.01,damping=0.85;
+    // Repulsion between all nodes
+    for(let i=0;i<nodes.length;i++){
+      for(let j=i+1;j<nodes.length;j++){
+        let dx=nodes[i]._x-nodes[j]._x,dy=nodes[i]._y-nodes[j]._y;
+        let d2=dx*dx+dy*dy;if(d2<1)d2=1;
+        const f=repulse/d2;const dist=Math.sqrt(d2);
+        nodes[i]._vx+=dx/dist*f;nodes[i]._vy+=dy/dist*f;
+        nodes[j]._vx-=dx/dist*f;nodes[j]._vy-=dy/dist*f;
+      }
+    }
+    // Attraction along edges
+    edges.forEach(e=>{
+      const si=idMap[e.source],ti=idMap[e.target];
+      if(si===undefined||ti===undefined)return;
+      const dx=nodes[ti]._x-nodes[si]._x,dy=nodes[ti]._y-nodes[si]._y;
+      nodes[si]._vx+=dx*attract;nodes[si]._vy+=dy*attract;
+      nodes[ti]._vx-=dx*attract;nodes[ti]._vy-=dy*attract;
+    });
+    // Center gravity
+    nodes.forEach(n=>{n._vx+=(cx-n._x)*center;n._vy+=(cy-n._y)*center;});
+    // Apply + damp
+    nodes.forEach(n=>{n._vx*=damping;n._vy*=damping;n._x+=n._vx;n._y+=n._vy;n._x=Math.max(40,Math.min(W-40,n._x));n._y=Math.max(30,Math.min(H-30,n._y));});
+  }
+
+  // Run 200 iterations
+  for(let i=0;i<200;i++)simulate();
+
+  let selectedNode=null;
+  let hoverNode=null;
+
+  function render(){
+    ctx.clearRect(0,0,W,H);
+    // Draw edges
+    edges.forEach(e=>{
+      const si=idMap[e.source],ti=idMap[e.target];
+      if(si===undefined||ti===undefined)return;
+      const s=nodes[si],t=nodes[ti];
+      const relColor=relColors[e.relation]||'#64748b';
+      const isHighlight=hoverNode&&(hoverNode.id===e.source||hoverNode.id===e.target);
+      ctx.beginPath();ctx.moveTo(s._x,s._y);ctx.lineTo(t._x,t._y);
+      ctx.strokeStyle=isHighlight?relColor:(isDark?'rgba(100,116,139,0.3)':'rgba(71,85,105,0.3)');
+      ctx.lineWidth=isHighlight?2.5:1.5;ctx.stroke();
+      // Edge label
+      const mx=(s._x+t._x)/2,my=(s._y+t._y)/2;
+      ctx.fillStyle=isHighlight?relColor:(isDark?'#64748b':'#94a3b8');
+      ctx.font='9px Inter,sans-serif';ctx.textAlign='center';ctx.textBaseline='middle';
+      ctx.fillText(e.relation,mx,my-6);
+    });
+    // Draw nodes
+    nodes.forEach(n=>{
+      const color=typeColors[n.type]||(isDark?'#94a3b8':'#475569');
+      const isHover=hoverNode&&hoverNode.id===n.id;
+      const isSelected=selectedNode&&selectedNode.id===n.id;
+      const r=isHover||isSelected?18:14;
+      // Glow
+      if(isHover||isSelected){ctx.beginPath();ctx.arc(n._x,n._y,r+6,0,Math.PI*2);ctx.fillStyle=color+'33';ctx.fill();}
+      // Circle
+      ctx.beginPath();ctx.arc(n._x,n._y,r,0,Math.PI*2);
+      ctx.fillStyle=color+(isHover||isSelected?'':'44');ctx.fill();
+      ctx.strokeStyle=color;ctx.lineWidth=2;ctx.stroke();
+      // Label
+      ctx.fillStyle=isDark?'#e2e8f0':'#0f172a';ctx.font='bold 10px Inter,sans-serif';ctx.textAlign='center';ctx.textBaseline='middle';
+      const label=n.name.length>10?n.name.slice(0,9)+'…':n.name;
+      ctx.fillText(label,n._x,n._y+r+12);
+    });
+  }
+
+  render();
+
+  // Interaction
+  function getNode(mx,my){
+    for(let i=nodes.length-1;i>=0;i--){
+      const dx=mx-nodes[i]._x,dy=my-nodes[i]._y;
+      if(dx*dx+dy*dy<18*18)return nodes[i];
+    }return null;
+  }
+
+  canvas.onmousemove=function(ev){
+    const rect=canvas.getBoundingClientRect();
+    const mx=ev.clientX-rect.left,my=ev.clientY-rect.top;
+    const prev=hoverNode;
+    hoverNode=getNode(mx,my);
+    if(hoverNode!==prev)render();
+    canvas.style.cursor=hoverNode?'pointer':'grab';
+  };
+
+  canvas.onclick=function(ev){
+    const rect=canvas.getBoundingClientRect();
+    const mx=ev.clientX-rect.left,my=ev.clientY-rect.top;
+    const n=getNode(mx,my);
+    if(!n){selectedNode=null;document.getElementById('method-graph-detail').style.display='none';render();return;}
+    selectedNode=n;
+    // Show detail
+    const color=typeColors[n.type]||(isDark?'#94a3b8':'#475569');
+    const papers=(n.papers||[]).join(', ')||'—';
+    // Find connected edges
+    const connEdges=edges.filter(e=>e.source===n.id||e.target===n.id);
+    let relHtml='';
+    connEdges.forEach(e=>{
+      const otherId=e.source===n.id?e.target:e.source;
+      const other=nodes[idMap[otherId]];
+      if(!other)return;
+      const rc=relColors[e.relation]||'#64748b';
+      relHtml+='<div style="display:flex;align-items:center;gap:8px;margin:4px 0"><span style="color:'+rc+';font-weight:600">'+e.relation+'</span> → <span style="color:'+color+'">'+other.name+'</span><span style="color:var(--text3);font-size:11px">'+(e.detail||'')+'</span></div>';
+    });
+    document.getElementById('method-graph-detail-content').innerHTML=
+      '<div style="display:flex;align-items:center;gap:8px;margin-bottom:8px"><span style="display:inline-block;width:12px;height:12px;border-radius:50%;background:'+color+'"></span><strong style="font-size:15px">'+n.name+'</strong><span style="font-size:11px;color:var(--text3);background:var(--surface2);padding:2px 8px;border-radius:4px">'+n.type+'</span></div>'+
+      '<div style="color:var(--text2);margin-bottom:8px">'+(n.detail||'')+'</div>'+
+      '<div style="margin-bottom:8px"><span style="color:var(--text3);font-size:12px">出现在论文:</span> '+papers+'</div>'+
+      (relHtml?'<div><span style="color:var(--text3);font-size:12px">关联关系:</span>'+relHtml+'</div>':'');
+    document.getElementById('method-graph-detail').style.display='block';
+    render();
+  };
 }
 
 function renderBlindspots(blindspots){

@@ -234,10 +234,11 @@ def trend_node(state: ResearchState) -> dict:
 
 # ── 节点10: Research Profile Graph Agent ──
 def profile_node(state: ResearchState) -> dict:
-    """Profile Graph Agent: 构建用户研究知识图谱"""
+    """Profile Graph Agent: 构建用户研究知识图谱（含方法组件关系图）"""
     query = state.get("query", "")
     papers = state.get("filtered_papers", state.get("papers", []))
     summary = state.get("summary", "")
+    decomposition = state.get("decomposition", [])
 
     # QA模式下summary为空，跳过profile构建（避免无意义的LLM调用）
     if not summary and not papers:
@@ -257,7 +258,7 @@ def profile_node(state: ResearchState) -> dict:
     if not all_papers and not query_history:
         return {}
 
-    result = build_profile_graph(llm, query_history, all_papers)
+    result = build_profile_graph(llm, query_history, all_papers, decomposition=decomposition)
 
     return {"profile_graph": result}
 

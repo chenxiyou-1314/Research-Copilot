@@ -115,8 +115,10 @@ def search_trend_stats(query: str, years: list[int] = None) -> dict:
     面向趋势分析的专用检索：按年份分桶查询 Semantic Scholar，
     利用 S2 API 返回的 total 字段获取每年的论文总量，无需拉取全部数据。
 
+    内置指数退避重试，应对 429 限流。
+
     Args:
-        query: 搜索关键词
+        query: 搜索关键词（建议英文）
         years: 需要统计的年份列表，默认近两年
 
     Returns:
@@ -125,6 +127,7 @@ def search_trend_stats(query: str, years: list[int] = None) -> dict:
             "query": query,
         }
     """
+    import time
     from datetime import datetime
     if years is None:
         current_year = datetime.now().year
@@ -134,38 +137,57 @@ def search_trend_stats(query: str, years: list[int] = None) -> dict:
     fields = "paperId,title,authors,year,citationCount"
 
     for year in years:
-        try:
-            # 第一轮：获取该年份的 total 数量 + 少量样本
-            resp = httpx.get(
-                f"{S2_BASE_URL}/paper/search",
-                params={
-                    "query": query,
-                    "limit": 50,  # 拉取 50 篇样本用于主题分析
-                    "fields": fields,
-                    "year": str(year),
-                },
-                timeout=30,
-            )
-            resp.raise_for_status()
-            data = resp.json()
+        max_retries = 3
+        for attempt in range(max_retries):
+            try:
+                resp = httpx.get(
+                    f"{S2_BASE_URL}/paper/search",
+                    params={
+                        "query": query,
+                        "limit": 50,
+                        "fields": fields,
+                        "year": str(year),
+                    },
+                    timeout=30,
+                )
+                resp.raise_for_status()
+                data = resp.json()
 
-            total = data.get("total", 0)
-            sample = []
-            for item in data.get("data", []):
-                sample.append({
-                    "title": item.get("title", ""),
-                    "authors": [a.get("name", "") for a in item.get("authors", [])][:3],
-                    "year": item.get("year"),
-                    "citations": item.get("citationCount", 0),
-                })
+                total = data.get("total", 0)
+                sample = []
+                for item in data.get("data", []):
+                    sample.append({
+                        "title": item.get("title", ""),
+                        "authors": [a.get("name", "") for a in item.get("authors", [])][:3],
+                        "year": item.get("year"),
+                        "citations": item.get("citationCount", 0),
+                    })
 
-            year_stats[str(year)] = {
-                "total": total,
-                "sample_papers": sample,
-            }
+                year_stats[str(year)] = {
+                    "total": total,
+                    "sample_papers": sample,
+                }
+                break  # 成功，跳出重试
 
-        except httpx.HTTPError as e:
-            print(f"[Scholar Trend] {year}年检索失败: {e}")
+            except httpx.HTTPStatusError as e:
+                if e.response.status_code == 429:
+                    wait = 2 ** attempt * 3  # 3s, 6s, 12s
+                    print(f"[Scholar Trend] {year}年 429限流，{wait}s后重试 ({attempt+1}/{max_retries})")
+                    time.sleep(wait)
+                else:
+                    print(f"[Scholar Trend] {year}年检索失败: {e}")
+                    year_stats[str(year)] = {"total": 0, "sample_papers": []}
+                    break
+            except httpx.HTTPError as e:
+                print(f"[Scholar Trend] {year}年检索失败: {e}")
+                year_stats[str(year)] = {"total": 0, "sample_papers": []}
+                break
+        else:
+            # 重试耗尽
             year_stats[str(year)] = {"total": 0, "sample_papers": []}
+
+        # 年份间加间隔，避免连续触发限流
+        if year != years[-1]:
+            time.sleep(1)
 
     return {"year_stats": year_stats, "query": query}

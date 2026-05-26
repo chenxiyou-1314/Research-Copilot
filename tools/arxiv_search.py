@@ -66,9 +66,10 @@ def search_arxiv_trend(query: str, years: list[int] = None) -> dict:
     """
     面向趋势分析的专用检索：按年份分桶检索 arXiv，
     拉取更多结果用于趋势统计（每年份 50 篇）。
+    内置指数退避重试，应对 429 限流。
 
     Args:
-        query: 搜索关键词
+        query: 搜索关键词（建议英文）
         years: 需要统计的年份列表，默认近两年
 
     Returns:
@@ -77,6 +78,7 @@ def search_arxiv_trend(query: str, years: list[int] = None) -> dict:
             "query": query,
         }
     """
+    import time
     from datetime import datetime
     if years is None:
         current_year = datetime.now().year
@@ -84,30 +86,46 @@ def search_arxiv_trend(query: str, years: list[int] = None) -> dict:
 
     year_stats = {}
     for year in years:
-        papers = []
-        try:
-            client = arxiv.Client()
-            # arXiv 搜索语法：按年份过滤
-            search_query = f"{query} AND submittedDate:[{year}01010000 TO {year}12312359]"
-            search = arxiv.Search(
-                query=search_query,
-                max_results=50,
-                sort_by=arxiv.SortCriterion.SubmittedDate,
-                sort_order=arxiv.SortOrder.Descending,
-            )
-            for result in client.results(search):
-                papers.append({
-                    "title": result.title,
-                    "authors": [a.name for a in result.authors][:3],
-                    "year": result.published.year,
-                    "citations": 0,
-                })
-        except Exception as e:
-            print(f"[arXiv Trend] {year}年检索失败: {e}")
+        max_retries = 3
+        for attempt in range(max_retries):
+            papers = []
+            try:
+                client = arxiv.Client()
+                search_query = f"{query} AND submittedDate:[{year}01010000 TO {year}12312359]"
+                search = arxiv.Search(
+                    query=search_query,
+                    max_results=50,
+                    sort_by=arxiv.SortCriterion.SubmittedDate,
+                    sort_order=arxiv.SortOrder.Descending,
+                )
+                for result in client.results(search):
+                    papers.append({
+                        "title": result.title,
+                        "authors": [a.name for a in result.authors][:3],
+                        "year": result.published.year,
+                        "citations": 0,
+                    })
+                year_stats[str(year)] = {
+                    "total": len(papers),
+                    "sample_papers": papers,
+                }
+                break  # 成功
 
-        year_stats[str(year)] = {
-            "total": len(papers),  # arXiv API 不返回 total，用实际获取数
-            "sample_papers": papers,
-        }
+            except Exception as e:
+                err_str = str(e)
+                if "429" in err_str or "rate" in err_str.lower():
+                    wait = 2 ** attempt * 5  # 5s, 10s, 20s（arXiv限流更严）
+                    print(f"[arXiv Trend] {year}年 429限流，{wait}s后重试 ({attempt+1}/{max_retries})")
+                    time.sleep(wait)
+                else:
+                    print(f"[arXiv Trend] {year}年检索失败: {e}")
+                    year_stats[str(year)] = {"total": 0, "sample_papers": []}
+                    break
+        else:
+            year_stats[str(year)] = {"total": 0, "sample_papers": []}
+
+        # 年份间加间隔
+        if year != years[-1]:
+            time.sleep(2)
 
     return {"year_stats": year_stats, "query": query}

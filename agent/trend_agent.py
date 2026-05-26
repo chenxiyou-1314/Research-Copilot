@@ -4,13 +4,42 @@
 - Semantic Scholar: 利用 total 字段获取每年论文总量（全领域统计）+ 50篇样本
 - arXiv: 每年份50篇样本
 - 两者合并后送入 LLM 做分析，确保趋势判断基于领域级数据而非局部样本。
+- 中文查询自动翻译为英文（S2/arXiv 均为英文数据库）
 """
 import json
+import re
 from datetime import datetime
 from langchain_core.language_models import BaseLanguageModel
 from agent.prompts import TIMELINE_ANALYSIS, METHOD_EVOLUTION, TREND_FORECAST
 from tools.scholar_search import search_trend_stats
 from tools.arxiv_search import search_arxiv_trend
+
+
+def _contains_chinese(text: str) -> bool:
+    """检测文本是否包含中文字符"""
+    return bool(re.search(r'[\u4e00-\u9fff]', text))
+
+
+def translate_query_to_english(llm: BaseLanguageModel, query: str) -> str:
+    """将中文查询翻译为英文学术搜索词。已是英文则直接返回。"""
+    if not _contains_chinese(query):
+        return query
+
+    prompt = (
+        f'将以下中文研究主题翻译为英文学术搜索关键词，用于 Semantic Scholar / arXiv 检索。'
+        f'只输出英文关键词，不要解释，不要标点，用空格分隔。如果有常用的英文缩写也加上。\n'
+        f'中文: {query}'
+    )
+    try:
+        response = llm.invoke(prompt)
+        translated = response.content.strip().strip('"').strip("'")
+        # 验证翻译结果确实不含中文
+        if _contains_chinese(translated):
+            return query
+        print(f"[Trend] 查询翻译: {query} → {translated}")
+        return translated
+    except Exception:
+        return query
 
 
 def _parse_json_response(content: str):
@@ -268,7 +297,7 @@ def run_trend_forecast(
     query: str,
 ) -> dict:
     """
-    完整的趋势预测流程：大规模统计检索→时间线分析→方法演化追踪→趋势预测。
+    完整的趋势预测流程：查询翻译→大规模统计检索→时间线分析→方法演化追踪→趋势预测。
 
     Step 0: 对 query 单独做一轮大规模检索（S2 + arXiv），获取领域级数据
     Step 1: 时间线分析（基于领域级统计 + 本地论文）
@@ -283,9 +312,12 @@ def run_trend_forecast(
             "trend_forecast": {...},
         }
     """
+    # Step -1: 中文查询翻译为英文
+    search_query = translate_query_to_english(llm, query)
+
     # Step 0: 领域级大规模检索（近两年）
-    print(f"[Trend] 执行领域级统计检索: {query}")
-    trend_stats = fetch_trend_stats(query)
+    print(f"[Trend] 执行领域级统计检索: {search_query}" + (f" (原始: {query})" if search_query != query else ""))
+    trend_stats = fetch_trend_stats(search_query)
     for year, stat in trend_stats.get("year_stats", {}).items():
         print(f"  {year}年: S2 total={stat.get('total', 0)}, 样本={len(stat.get('sample_papers', []))}篇")
 

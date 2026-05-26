@@ -60,3 +60,54 @@ def search_arxiv_advanced(
         query += f" AND cat:{category}"
     
     return search_arxiv(query, max_results=max_results)
+
+
+def search_arxiv_trend(query: str, years: list[int] = None) -> dict:
+    """
+    面向趋势分析的专用检索：按年份分桶检索 arXiv，
+    拉取更多结果用于趋势统计（每年份 50 篇）。
+
+    Args:
+        query: 搜索关键词
+        years: 需要统计的年份列表，默认近两年
+
+    Returns:
+        {
+            "year_stats": {"2025": {"total": count, "sample_papers": [...]}, ...},
+            "query": query,
+        }
+    """
+    from datetime import datetime
+    if years is None:
+        current_year = datetime.now().year
+        years = [current_year - 1, current_year]
+
+    year_stats = {}
+    for year in years:
+        papers = []
+        try:
+            client = arxiv.Client()
+            # arXiv 搜索语法：按年份过滤
+            search_query = f"{query} AND submittedDate:[{year}01010000 TO {year}12312359]"
+            search = arxiv.Search(
+                query=search_query,
+                max_results=50,
+                sort_by=arxiv.SortCriterion.SubmittedDate,
+                sort_order=arxiv.SortOrder.Descending,
+            )
+            for result in client.results(search):
+                papers.append({
+                    "title": result.title,
+                    "authors": [a.name for a in result.authors][:3],
+                    "year": result.published.year,
+                    "citations": 0,
+                })
+        except Exception as e:
+            print(f"[arXiv Trend] {year}年检索失败: {e}")
+
+        year_stats[str(year)] = {
+            "total": len(papers),  # arXiv API 不返回 total，用实际获取数
+            "sample_papers": papers,
+        }
+
+    return {"year_stats": year_stats, "query": query}

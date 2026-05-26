@@ -215,18 +215,17 @@ def decomposition_node(state: ResearchState) -> dict:
 
 # ── 节点9: Trend Forecasting Agent ──
 def trend_node(state: ResearchState) -> dict:
-    """Trend Forecasting Agent: 时间线分析→方法演化追踪→趋势预测"""
+    """Trend Forecasting Agent: 大规模统计检索→时间线分析→方法演化追踪→趋势预测"""
     papers = state.get("filtered_papers", state.get("papers", []))
     decomposition = state.get("decomposition", [])
     gaps = state.get("gaps", {})
     query = state["query"]
 
-    if not papers:
-        return {}
-
-    result = run_trend_forecast(llm, papers, decomposition, gaps, query)
+    # 即使没有本地论文也可以运行——trend 会自行做大规模检索
+    result = run_trend_forecast(llm, papers or [], decomposition, gaps, query)
 
     return {
+        "trend_stats": result.get("trend_stats", {}),
         "timeline": result["timeline"],
         "evolution": result["evolution"],
         "trend_forecast": result["trend_forecast"],

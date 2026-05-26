@@ -146,6 +146,7 @@ async def research_stream(req: ResearchRequest):
             if result.get("trend_forecast"):
                 trend_data = {
                     "step": "trend",
+                    "trend_stats": result.get("trend_stats", {}),
                     "timeline": result.get("timeline", {}),
                     "evolution": result.get("evolution", {}),
                     "forecast": result["trend_forecast"],
@@ -244,17 +245,16 @@ async def method_decomposition(req: DecomposeRequest):
 # ── 趋势预测 ──
 @app.post("/trend")
 async def trend_forecast(req: TrendRequest):
-    """独立调用趋势预测（需要论文库中已有论文）。"""
+    """独立调用趋势预测（会自动做大规模统计检索，无需依赖本地论文库）。"""
     from agent.graph import _get_llm, llm
     from agent.trend_agent import run_trend_forecast
     
-    papers = paper_store.get_all_papers()
-    if not papers:
-        return {"error": "论文库为空，请先生成综述索引论文", "timeline": {}, "evolution": {}, "trend_forecast": {}}
-    
+    # 趋势预测现在自行做大规模检索，本地论文仅作补充
+    papers = paper_store.get_all_papers() or []
     result = run_trend_forecast(llm, papers, [], {}, req.query)
     
     return {
+        "trend_stats": result.get("trend_stats", {}),
         "timeline": result["timeline"],
         "evolution": result["evolution"],
         "trend_forecast": result["trend_forecast"],
@@ -865,17 +865,21 @@ async function doGenerate(){
             forecastHtml+='</div>';
             // Phase reasoning
             if(fc.phase_reasoning)forecastHtml+='<div style="background:var(--bg);padding:14px;border-radius:8px;margin-bottom:16px;font-size:13px;color:var(--text2);line-height:1.7;border-left:3px solid '+phaseColor+'">'+fc.phase_reasoning+'</div>';
-            // Timeline mini chart
+            // Timeline mini chart (领域级统计)
             const yd=tl.year_distribution||{};
             const years=Object.keys(yd).sort();
             if(years.length>0){
-              const maxCount=Math.max(...years.map(y=>(yd[y]||{}).count||0),1);
-              forecastHtml+='<h4 style="color:var(--text);font-size:13px;margin-bottom:8px">📅 论文时间线</h4><div style="display:flex;align-items:flex-end;gap:6px;height:80px;margin-bottom:16px;padding:0 4px">';
+              const maxTotal=Math.max(...years.map(y=>(yd[y]||{}).total_in_field||(yd[y]||{}).count||0),1);
+              forecastHtml+='<h4 style="color:var(--text);font-size:13px;margin-bottom:8px">📅 论文时间线（领域级统计）</h4><div style="display:flex;align-items:flex-end;gap:6px;height:80px;margin-bottom:16px;padding:0 4px">';
               years.forEach(y=>{
-                const cnt=(yd[y]||{}).count||0;
-                const h=Math.max(8,Math.round(cnt/maxCount*70));
+                const fieldTotal=(yd[y]||{}).total_in_field||0;
+                const localCnt=(yd[y]||{}).count||0;
+                const displayTotal=fieldTotal||localCnt;
+                const h=Math.max(8,Math.round(displayTotal/maxTotal*70));
                 const kws=((yd[y]||{}).keywords||[]).slice(0,2).join(', ');
-                forecastHtml+='<div style="flex:1;text-align:center" title="'+kws+'"><div style="height:'+h+'px;background:linear-gradient(180deg,var(--primary),var(--primary2));border-radius:4px 4px 0 0;margin:0 auto;width:80%"></div><div style="font-size:10px;color:var(--text3);margin-top:4px">'+y+'</div><div style="font-size:9px;color:var(--primary)">'+cnt+'篇</div></div>';
+                const label=fieldTotal?fieldTotal.toLocaleString():localCnt;
+                const subLabel=fieldTotal?'领域总量':'本地';
+                forecastHtml+='<div style="flex:1;text-align:center" title="'+kws+'"><div style="height:'+h+'px;background:linear-gradient(180deg,var(--primary),var(--primary2));border-radius:4px 4px 0 0;margin:0 auto;width:80%"></div><div style="font-size:10px;color:var(--text3);margin-top:4px">'+y+'</div><div style="font-size:9px;color:var(--primary)">'+label+'篇</div><div style="font-size:8px;color:var(--text3)">'+subLabel+'</div></div>';
               });
               forecastHtml+='</div>';
             }
@@ -1051,7 +1055,7 @@ async function doTrendStandalone(){
   const emptyEl=document.getElementById('trend-standalone-empty');
   resultEl.style.display='none';emptyEl.style.display='none';
   // Show loading
-  document.getElementById('trend-sa-phase').innerHTML='<div style="text-align:center;padding:40px;color:var(--text3)">⏳ 正在分析趋势，请稍候...</div>';
+  document.getElementById('trend-sa-phase').innerHTML='<div style="text-align:center;padding:40px;color:var(--text3)">⏳ 正在检索领域数据并分析趋势，请稍候...</div>';
   resultEl.style.display='block';
   try{
     const resp=await fetch('/trend',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({query:q})});
@@ -1078,17 +1082,21 @@ async function doTrendStandalone(){
     // Reasoning
     if(fc.phase_reasoning)document.getElementById('trend-sa-reasoning').innerHTML='<div class="card"><div style="font-size:13px;color:var(--text2);line-height:1.7;border-left:3px solid '+pc+';padding-left:12px">'+fc.phase_reasoning+'</div></div>';
     else document.getElementById('trend-sa-reasoning').innerHTML='';
-    // Timeline
+    // Timeline (领域级统计)
     const yd=tl.year_distribution||{};
     const years=Object.keys(yd).sort();
     if(years.length>0){
-      const maxCount=Math.max(...years.map(y=>(yd[y]||{}).count||0),1);
-      let tlHtml='<div class="card"><h3>📅 论文时间线</h3><div style="display:flex;align-items:flex-end;gap:8px;height:100px;padding:0 8px">';
+      const maxTotal=Math.max(...years.map(y=>(yd[y]||{}).total_in_field||(yd[y]||{}).count||0),1);
+      let tlHtml='<div class="card"><h3>📅 论文时间线（领域级统计）</h3><div style="display:flex;align-items:flex-end;gap:8px;height:120px;padding:0 8px">';
       years.forEach(y=>{
-        const cnt=(yd[y]||{}).count||0;
-        const h=Math.max(12,Math.round(cnt/maxCount*85));
+        const localCnt=(yd[y]||{}).count||0;
+        const fieldTotal=(yd[y]||{}).total_in_field||0;
+        const displayTotal=fieldTotal||localCnt;
+        const h=Math.max(12,Math.round(displayTotal/maxTotal*100));
         const kws=((yd[y]||{}).keywords||[]).slice(0,2).join(', ');
-        tlHtml+='<div style="flex:1;text-align:center" title="'+kws+'"><div style="height:'+h+'px;background:linear-gradient(180deg,var(--primary),var(--primary2));border-radius:4px 4px 0 0;margin:0 auto;width:70%"></div><div style="font-size:11px;color:var(--text3);margin-top:4px">'+y+'</div><div style="font-size:10px;color:var(--primary)">'+cnt+'篇</div></div>';
+        const label=fieldTotal?fieldTotal.toLocaleString()+'篇':localCnt+'篇';
+        const subLabel=fieldTotal?'(领域总量)':'(本地样本)';
+        tlHtml+='<div style="flex:1;text-align:center" title="'+kws+'"><div style="height:'+h+'px;background:linear-gradient(180deg,var(--primary),var(--primary2));border-radius:4px 4px 0 0;margin:0 auto;width:70%"></div><div style="font-size:11px;color:var(--text3);margin-top:4px">'+y+'</div><div style="font-size:11px;font-weight:600;color:var(--primary)">'+label+'</div><div style="font-size:9px;color:var(--text3)">'+subLabel+'</div></div>';
       });
       tlHtml+='</div></div>';
       document.getElementById('trend-sa-timeline').innerHTML=tlHtml;

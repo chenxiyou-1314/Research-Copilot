@@ -108,3 +108,64 @@ def enrich_citations(papers: list[dict]) -> list[dict]:
             pass
     
     return papers
+
+
+def search_trend_stats(query: str, years: list[int] = None) -> dict:
+    """
+    面向趋势分析的专用检索：按年份分桶查询 Semantic Scholar，
+    利用 S2 API 返回的 total 字段获取每年的论文总量，无需拉取全部数据。
+
+    Args:
+        query: 搜索关键词
+        years: 需要统计的年份列表，默认近两年
+
+    Returns:
+        {
+            "year_stats": {"2025": {"total": 1234, "sample_papers": [...]}, ...},
+            "query": query,
+        }
+    """
+    from datetime import datetime
+    if years is None:
+        current_year = datetime.now().year
+        years = [current_year - 1, current_year]
+
+    year_stats = {}
+    fields = "paperId,title,authors,year,citationCount"
+
+    for year in years:
+        try:
+            # 第一轮：获取该年份的 total 数量 + 少量样本
+            resp = httpx.get(
+                f"{S2_BASE_URL}/paper/search",
+                params={
+                    "query": query,
+                    "limit": 50,  # 拉取 50 篇样本用于主题分析
+                    "fields": fields,
+                    "year": str(year),
+                },
+                timeout=30,
+            )
+            resp.raise_for_status()
+            data = resp.json()
+
+            total = data.get("total", 0)
+            sample = []
+            for item in data.get("data", []):
+                sample.append({
+                    "title": item.get("title", ""),
+                    "authors": [a.get("name", "") for a in item.get("authors", [])][:3],
+                    "year": item.get("year"),
+                    "citations": item.get("citationCount", 0),
+                })
+
+            year_stats[str(year)] = {
+                "total": total,
+                "sample_papers": sample,
+            }
+
+        except httpx.HTTPError as e:
+            print(f"[Scholar Trend] {year}年检索失败: {e}")
+            year_stats[str(year)] = {"total": 0, "sample_papers": []}
+
+    return {"year_stats": year_stats, "query": query}

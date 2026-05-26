@@ -63,6 +63,7 @@ class ResearchState(TypedDict, total=False):
     validated_recombinations: list   # 可行性验证后的重组方案
 
     # ── Trend Forecasting Agent ──
+    trend_stats: dict                # 领域级统计数据（S2 total + 大样本）
     timeline: dict                   # 时间线分析结果
     evolution: dict                  # 方法演化追踪结果
     trend_forecast: dict             # 趋势预测结果
